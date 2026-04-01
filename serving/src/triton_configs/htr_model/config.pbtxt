@@ -1,0 +1,27 @@
+name: "htr_model"
+backend: "onnxruntime"
+max_batch_size: 16
+
+input [
+  {
+    name: "pixel_values"
+    data_type: TYPE_FP32
+    dims: [ 3, 384, 384 ]
+  }
+]
+
+output [
+  {
+    name: "last_hidden_state"
+    data_type: TYPE_FP32
+    dims: [ -1, -1 ]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+    gpus: [ 0 ]
+  }
+]
