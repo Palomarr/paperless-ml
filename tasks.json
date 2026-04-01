@@ -6,7 +6,7 @@
       "id": 1,
       "name": "Build and push Docker image",
       "description": "Get Dockerfile building on P100 node. Use PyTorch+CUDA base image. Bake TrOCR-small and MiniLM weights into the image at build time.",
-      "status": "todo",
+      "status": "done",
       "validation": [
         "docker build completes without errors",
         "docker image contains model weights (no download on startup)",
@@ -17,7 +17,7 @@
       "id": 2,
       "name": "Smoke test both endpoints",
       "description": "Confirm /predict/htr accepts base64 image and returns transcription + confidence. Confirm /predict/search accepts query string and returns ranked results with scores. Confirm /health reports correct device.",
-      "status": "todo",
+      "status": "done",
       "validation": [
         "POST /predict/htr with base64 image returns {transcription, confidence}",
         "POST /predict/search with query string returns ranked results with scores",
@@ -29,7 +29,7 @@
       "id": 3,
       "name": "Baseline benchmark — CPU",
       "description": "Run container without GPU. Write benchmarking script that sweeps concurrency levels (1, 4, 8, 16). Record p50/p95 latency, throughput, error rate. Use synthetic image for HTR and representative query for search. 50-100+ requests per level.",
-      "status": "todo",
+      "status": "done",
       "validation": [
         "Benchmark script runs end-to-end with GPU disabled",
         "Results collected for concurrency levels 1, 4, 8, 16",
@@ -41,7 +41,7 @@
       "id": 4,
       "name": "Baseline benchmark — GPU",
       "description": "Restart container with P100 exposed. Re-run same benchmark script at same concurrency levels. Expect meaningful latency drop on HTR, possibly smaller on search.",
-      "status": "todo",
+      "status": "done",
       "validation": [
         "Benchmark script runs end-to-end with P100 GPU",
         "Results collected for concurrency levels 1, 4, 8, 16",
@@ -53,7 +53,7 @@
       "id": 5,
       "name": "Record results in serving options table",
       "description": "Fill in rows: baseline_pytorch_cpu and baseline_pytorch_gpu. Columns: option name, endpoint URL, model version (HF model ID + pretrained), code version (git SHA), hardware, p50/p95 latency per endpoint, throughput, error rate, concurrency tested, compute instance type, resource utilization notes.",
-      "status": "todo",
+      "status": "done",
       "validation": [
         "Table has baseline_pytorch_cpu row with all columns filled",
         "Table has baseline_pytorch_gpu row with all columns filled",
