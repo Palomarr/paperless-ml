@@ -13,8 +13,8 @@ from transformers import TrOCRProcessor
 
 
 def export_biencoder(output_dir: str) -> str:
-    """B1: Export bi-encoder (all-MiniLM-L6-v2) to ONNX."""
-    print("=== B1: Exporting bi-encoder to ONNX ===")
+    """Export bi-encoder (all-MiniLM-L6-v2) to ONNX."""
+    print("=== Exporting bi-encoder to ONNX ===")
 
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     transformer = model[0].auto_model
@@ -57,8 +57,8 @@ def export_biencoder(output_dir: str) -> str:
 
 
 def export_htr(output_dir: str) -> str:
-    """B2: Export HTR model (trocr-small-handwritten) to ONNX via optimum."""
-    print("\n=== B2: Exporting HTR model to ONNX ===")
+    """Export HTR model (trocr-small-handwritten) to ONNX via optimum."""
+    print("\n=== Exporting HTR model to ONNX ===")
 
     from optimum.onnxruntime import ORTModelForVision2Seq
 
@@ -84,8 +84,8 @@ def export_htr(output_dir: str) -> str:
 
 
 def validate_exports(output_dir: str):
-    """B3: Validate both ONNX exports."""
-    print("\n=== B3: Validating exports ===")
+    """Validate both ONNX exports."""
+    print("\n=== Validating exports ===")
 
     # Bi-encoder validation
     print("Validating bi-encoder...")

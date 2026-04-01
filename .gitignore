@@ -19,3 +19,4 @@ huggingface/
 .DS_Store
 Thumbs.db
 checklist.json
+tasks.json
