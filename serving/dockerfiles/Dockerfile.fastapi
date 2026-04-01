@@ -22,6 +22,14 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
     Pillow \
     numpy
 
+# Pre-download model weights into the image
+RUN python -c "\
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel; \
+TrOCRProcessor.from_pretrained('microsoft/trocr-small-handwritten'); \
+VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-small-handwritten'); \
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
 COPY src/fastapi_app/app.py /app/app.py
 
 WORKDIR /app

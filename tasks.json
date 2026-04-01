@@ -1,0 +1,85 @@
+{
+  "project": "ml-systems-serving",
+  "date": "2026-04-01",
+  "tasks": [
+    {
+      "id": 1,
+      "name": "Build and push Docker image",
+      "description": "Get Dockerfile building on P100 node. Use PyTorch+CUDA base image. Bake TrOCR-small and MiniLM weights into the image at build time.",
+      "status": "todo",
+      "validation": [
+        "docker build completes without errors",
+        "docker image contains model weights (no download on startup)",
+        "Container starts successfully on P100 node"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Smoke test both endpoints",
+      "description": "Confirm /predict/htr accepts base64 image and returns transcription + confidence. Confirm /predict/search accepts query string and returns ranked results with scores. Confirm /health reports correct device.",
+      "status": "todo",
+      "validation": [
+        "POST /predict/htr with base64 image returns {transcription, confidence}",
+        "POST /predict/search with query string returns ranked results with scores",
+        "GET /health returns correct device detection (CPU vs CUDA)",
+        "No import errors or shape mismatches"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Baseline benchmark — CPU",
+      "description": "Run container without GPU. Write benchmarking script that sweeps concurrency levels (1, 4, 8, 16). Record p50/p95 latency, throughput, error rate. Use synthetic image for HTR and representative query for search. 50-100+ requests per level.",
+      "status": "todo",
+      "validation": [
+        "Benchmark script runs end-to-end with GPU disabled",
+        "Results collected for concurrency levels 1, 4, 8, 16",
+        "Each level has p50 latency, p95 latency, throughput (req/s), error rate",
+        "Both /predict/htr and /predict/search endpoints benchmarked"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Baseline benchmark — GPU",
+      "description": "Restart container with P100 exposed. Re-run same benchmark script at same concurrency levels. Expect meaningful latency drop on HTR, possibly smaller on search.",
+      "status": "todo",
+      "validation": [
+        "Benchmark script runs end-to-end with P100 GPU",
+        "Results collected for concurrency levels 1, 4, 8, 16",
+        "Each level has p50 latency, p95 latency, throughput (req/s), error rate",
+        "Both endpoints benchmarked, results comparable to CPU run"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Record results in serving options table",
+      "description": "Fill in rows: baseline_pytorch_cpu and baseline_pytorch_gpu. Columns: option name, endpoint URL, model version (HF model ID + pretrained), code version (git SHA), hardware, p50/p95 latency per endpoint, throughput, error rate, concurrency tested, compute instance type, resource utilization notes.",
+      "status": "todo",
+      "validation": [
+        "Table has baseline_pytorch_cpu row with all columns filled",
+        "Table has baseline_pytorch_gpu row with all columns filled",
+        "Resource utilization observations from htop/nvtop included"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Commit and push",
+      "description": "Commit app code, Dockerfile, compose file, and benchmark script. Push to unblock teammates for review.",
+      "status": "todo",
+      "validation": [
+        "All serving files committed (app, Dockerfile, compose, benchmark script)",
+        "Pushed to remote serving branch"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "ONNX export (stretch)",
+      "description": "Export both models to ONNX. MiniLM via torch.onnx.export, TrOCR via optimum ORTModelForVision2Seq. Verify exported models load in ORT session with correct output shapes.",
+      "status": "todo",
+      "validation": [
+        "MiniLM exported to .onnx, loads in onnxruntime.InferenceSession",
+        "TrOCR exported to .onnx via optimum, loads in ORT session",
+        "Both models produce correct output shapes on sample input"
+      ]
+    }
+  ]
+}

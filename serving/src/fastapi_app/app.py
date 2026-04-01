@@ -96,6 +96,12 @@ chunk_embeddings: np.ndarray = st_model.encode(chunk_texts, convert_to_numpy=Tru
 
 app = FastAPI(title="Paperless-ngx ML Serving")
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "device": device}
+
+
 # ---------------------------------------------------------------------------
 # HTR endpoint
 # ---------------------------------------------------------------------------
