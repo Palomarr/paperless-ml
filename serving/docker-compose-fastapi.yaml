@@ -1,0 +1,24 @@
+services:
+  fastapi_server:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.fastapi
+      args:
+        # Chameleon P100: uncomment these two lines, comment out the CPU defaults
+        # BASE_IMAGE: nvidia/cuda:11.8.0-runtime-ubuntu22.04
+        # TORCH_INDEX: https://download.pytorch.org/whl/cu118
+        BASE_IMAGE: python:3.10-slim
+        TORCH_INDEX: https://download.pytorch.org/whl/cpu
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TORCH_CUDA_ARCH_LIST=6.0
+    # GPU reservation (uncomment on Chameleon):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

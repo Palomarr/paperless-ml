@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+.venv/
+
+# Model artifacts
+onnx_models/
+*.onnx
+
+# HF cache
+.cache/
+huggingface/
+
+# OS
+.DS_Store
+Thumbs.db
+checklist.json

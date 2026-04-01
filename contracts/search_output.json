@@ -1,27 +1,13 @@
 {
-  "query": "lease agreement expiring in June",
+  "query": "find the lease expiring in June",
   "source": "semantic",
   "results": [
     {
-      "document_id": 1042,
-      "page_number": 2,
-      "region_id": 5,
-      "score": 0.91,
-      "snippet": "...term ends June 30, 2025. Lessee shall vacate..."
-    },
-    {
-      "document_id": 876,
+      "document_id": 3,
       "page_number": 1,
-      "region_id": 3,
-      "score": 0.84,
-      "snippet": "...rental contract expires on June 15, 2025..."
-    },
-    {
-      "document_id": 2301,
-      "page_number": 4,
-      "region_id": 1,
-      "score": 0.72,
-      "snippet": "...agreement renewal deadline is July 1..."
+      "region_id": 2,
+      "score": 0.82,
+      "snippet": "The lease agreement expires on June 30, 2026."
     }
   ]
 }

@@ -1,0 +1,30 @@
+# ---------- Build args ----------
+ARG BASE_IMAGE=python:3.10-slim
+# Chameleon P100 GPU: nvidia/cuda:11.8.0-runtime-ubuntu22.04
+
+FROM ${BASE_IMAGE}
+
+# For P100 (compute capability 6.0)
+ENV TORCH_CUDA_ARCH_LIST="6.0"
+
+# Install torch
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch --index-url ${TORCH_INDEX} && \
+    pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    "transformers<4.50" \
+    sentence-transformers \
+    sentencepiece \
+    protobuf \
+    safetensors \
+    Pillow \
+    numpy
+
+COPY src/fastapi_app/app.py /app/app.py
+
+WORKDIR /app
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

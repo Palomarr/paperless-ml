@@ -1,4 +1,4 @@
 {
-  "query": "lease agreement expiring in June",
+  "query": "find the lease expiring in June",
   "top_k": 5
 }

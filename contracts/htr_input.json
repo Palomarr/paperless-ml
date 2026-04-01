@@ -1,6 +1,6 @@
 {
-  "image": "<base64-encoded-cropped-line-image>",
-  "document_id": 1042,
+  "image": "<base64-encoded-image-string>",
+  "document_id": 1,
   "page_number": 1,
-  "region_id": 3
+  "region_id": 1
 }
