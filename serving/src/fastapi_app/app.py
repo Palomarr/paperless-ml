@@ -13,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 # ---------------------------------------------------------------------------
-# A1 – Model loading (module level)
+# Model loading (module level)
 # ---------------------------------------------------------------------------
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -32,7 +32,7 @@ st_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=
 st_model.eval()
 
 # ---------------------------------------------------------------------------
-# A2 – Pydantic models
+# Pydantic models
 # ---------------------------------------------------------------------------
 
 
@@ -71,7 +71,7 @@ class SearchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# A4 – Mock document index (built at import / startup time)
+# Mock document index (built at import / startup time)
 # ---------------------------------------------------------------------------
 
 MOCK_CHUNKS: list[dict] = [
@@ -97,7 +97,7 @@ chunk_embeddings: np.ndarray = st_model.encode(chunk_texts, convert_to_numpy=Tru
 app = FastAPI(title="Paperless-ngx ML Serving")
 
 # ---------------------------------------------------------------------------
-# A3 – HTR endpoint
+# HTR endpoint
 # ---------------------------------------------------------------------------
 
 
@@ -149,7 +149,7 @@ async def predict_htr(req: HTRRequest) -> HTRResponse:
 
 
 # ---------------------------------------------------------------------------
-# A4 – Search endpoint
+# Search endpoint
 # ---------------------------------------------------------------------------
 
 
