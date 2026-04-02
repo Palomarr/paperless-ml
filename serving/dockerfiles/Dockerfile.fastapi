@@ -21,7 +21,9 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
     safetensors \
     Pillow \
     numpy \
-    boto3
+    boto3 \
+    minio \
+    qdrant-client
 
 # Pre-download model weights into the image
 RUN python -c "\
@@ -32,6 +34,7 @@ from sentence_transformers import SentenceTransformer; \
 SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
 
 COPY src/fastapi_app/app.py /app/app.py
+COPY src/fastapi_app/s3_utils.py /app/s3_utils.py
 
 WORKDIR /app
 

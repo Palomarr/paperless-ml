@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import base64
 import io
+import logging
 import math
 import os
 import time
 
-import boto3
 import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, HTTPException
 from PIL import Image
 from pydantic import BaseModel
 from transformers import AutoTokenizer, TrOCRProcessor
+
+from s3_utils import download_image_from_s3
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -22,6 +27,17 @@ from transformers import AutoTokenizer, TrOCRProcessor
 ONNX_DIR = os.environ.get("ONNX_DIR", "/models")
 BIENCODER_PATH = os.path.join(ONNX_DIR, "biencoder.onnx")
 HTR_DIR = os.path.join(ONNX_DIR, "htr_onnx")
+
+QDRANT_HOST = os.environ.get("QDRANT_HOST", "qdrant")
+QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
+QDRANT_COLLECTION = "document_chunks"
+
+USE_MOCK_CHUNKS = os.environ.get("USE_MOCK_CHUNKS", "true").lower() == "true"
+SIMILARITY_THRESHOLD = 0.4
+
+HTR_MODEL_VERSION = os.environ.get("HTR_MODEL_VERSION", "htr_v1")
+HTR_CONFIDENCE_THRESHOLD = float(os.environ.get("HTR_CONFIDENCE_THRESHOLD", "0.5"))
+RETRIEVAL_MODEL_VERSION = os.environ.get("RETRIEVAL_MODEL_VERSION", "retrieval_v1")
 
 # Pick execution provider based on available hardware
 providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -46,23 +62,29 @@ biencoder_tokenizer = AutoTokenizer.from_pretrained(
 from optimum.onnxruntime import ORTModelForVision2Seq
 
 trocr_model = ORTModelForVision2Seq.from_pretrained(HTR_DIR, provider=providers[0])
+# NOTE: We use TrOCR's AutoProcessor for preprocessing (resize, normalize to
+# ImageNet stats, etc.) because our model expects that format.  Elnath's
+# feature pipeline preprocesses differently (grayscale, 128px height, [-1,1]
+# normalization) but that is for their upstream segmentation — our TrOCR model
+# dictates its own preprocessing requirements.
 trocr_processor = TrOCRProcessor.from_pretrained(
     "microsoft/trocr-small-handwritten", use_fast=False
 )
 
 # ---------------------------------------------------------------------------
-# MinIO / S3 client
+# Qdrant client (lazy — only used when USE_MOCK_CHUNKS is False)
 # ---------------------------------------------------------------------------
 
-s3_client = boto3.client(
-    "s3",
-    endpoint_url=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000"),
-    aws_access_key_id=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-    aws_secret_access_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
-)
+qdrant_client = None
+try:
+    from qdrant_client import QdrantClient
+
+    qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=5)
+except Exception:
+    logger.warning("qdrant-client not available; will use mock chunks or fallback")
 
 # ---------------------------------------------------------------------------
-# Pydantic models (same schema as PyTorch app)
+# Pydantic models — match data-team JSON contracts exactly
 # ---------------------------------------------------------------------------
 
 
@@ -76,6 +98,8 @@ class HTRRequest(BaseModel):
     image_format: str | None = None
     source: str | None = None
     uploaded_at: str | None = None
+    # base64 fallback for benchmarking without MinIO
+    image_base64: str | None = None
 
 
 class HTRResponse(BaseModel):
@@ -111,7 +135,7 @@ class SearchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Mock document index
+# Mock document index (for benchmarking without Qdrant)
 # ---------------------------------------------------------------------------
 
 MOCK_CHUNKS: list[dict] = [
@@ -151,8 +175,10 @@ def _encode_texts(texts: list[str]) -> np.ndarray:
     return pooled
 
 
-chunk_texts: list[str] = [c["text"] for c in MOCK_CHUNKS]
-chunk_embeddings: np.ndarray = _encode_texts(chunk_texts)
+# Pre-compute mock chunk embeddings for benchmarking mode
+if USE_MOCK_CHUNKS:
+    chunk_texts: list[str] = [c["text"] for c in MOCK_CHUNKS]
+    chunk_embeddings: np.ndarray = _encode_texts(chunk_texts)
 
 # ---------------------------------------------------------------------------
 # FastAPI application
@@ -171,30 +197,23 @@ async def health():
 # ---------------------------------------------------------------------------
 
 
-def _fetch_image_from_s3(s3_url: str) -> Image.Image:
-    """Download an image from an s3:// URL via the configured MinIO client."""
-    if not s3_url.startswith("s3://"):
-        raise ValueError(f"Expected s3:// URL, got: {s3_url}")
-    without_scheme = s3_url[len("s3://"):]
-    bucket, _, key = without_scheme.partition("/")
-    response = s3_client.get_object(Bucket=bucket, Key=key)
-    image_bytes = response["Body"].read()
-    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
-
-
-HTR_MODEL_VERSION = os.environ.get("HTR_MODEL_VERSION", "htr_v1")
-HTR_CONFIDENCE_THRESHOLD = float(os.environ.get("HTR_CONFIDENCE_THRESHOLD", "0.5"))
-
-
 @app.post("/predict/htr", response_model=HTRResponse)
 async def predict_htr(req: HTRRequest) -> HTRResponse:
-    t0 = time.perf_counter()
+    # Fetch image — try base64 fallback first, then S3
+    if req.image_base64:
+        image_bytes = base64.b64decode(req.image_base64)
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    else:
+        try:
+            image = download_image_from_s3(req.crop_s3_url)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Failed to fetch image from S3 and no image_base64 fallback provided: {exc}",
+            )
 
-    # Fetch image from MinIO
-    try:
-        image = _fetch_image_from_s3(req.crop_s3_url)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to fetch image: {exc}")
+    # Start timing after image acquisition (measure inference only)
+    t0 = time.perf_counter()
 
     pixel_values = trocr_processor(images=image, return_tensors="pt").pixel_values
 
@@ -238,7 +257,58 @@ async def predict_htr(req: HTRRequest) -> HTRResponse:
 # ---------------------------------------------------------------------------
 
 
-RETRIEVAL_MODEL_VERSION = os.environ.get("RETRIEVAL_MODEL_VERSION", "retrieval_v1")
+def _search_qdrant(query_embedding: np.ndarray, top_k: int) -> list[dict] | None:
+    """Search Qdrant for similar chunks. Returns None if unavailable."""
+    if qdrant_client is None:
+        return None
+    try:
+        hits = qdrant_client.search(
+            collection_name=QDRANT_COLLECTION,
+            query_vector=query_embedding.squeeze().tolist(),
+            limit=top_k * 3,  # over-fetch for deduplication
+        )
+        results = []
+        for hit in hits:
+            payload = hit.payload or {}
+            results.append({
+                "document_id": payload.get("document_id", ""),
+                "chunk_index": payload.get("chunk_index", 0),
+                "chunk_text": payload.get("chunk_text", ""),
+                "similarity_score": float(hit.score),
+            })
+        return results
+    except Exception:
+        logger.warning("Qdrant search failed; falling back", exc_info=True)
+        return None
+
+
+def _search_mock(query_embedding: np.ndarray, top_k: int) -> list[dict]:
+    """Search mock chunks using cosine similarity."""
+    similarities = np.dot(chunk_embeddings, query_embedding.T).squeeze()
+    norms = np.linalg.norm(chunk_embeddings, axis=1) * np.linalg.norm(query_embedding)
+    cosine_scores = similarities / norms
+    ranked_indices = np.argsort(cosine_scores)[::-1]
+
+    results = []
+    for idx in ranked_indices[:top_k]:
+        chunk = MOCK_CHUNKS[int(idx)]
+        results.append({
+            "document_id": chunk["document_id"],
+            "chunk_index": chunk["chunk_index"],
+            "chunk_text": chunk["text"],
+            "similarity_score": round(float(cosine_scores[idx]), 4),
+        })
+    return results
+
+
+def _deduplicate_to_document(results: list[dict]) -> list[dict]:
+    """Keep the best-scoring chunk per document_id."""
+    best: dict[str, dict] = {}
+    for r in results:
+        doc_id = r["document_id"]
+        if doc_id not in best or r["similarity_score"] > best[doc_id]["similarity_score"]:
+            best[doc_id] = r
+    return sorted(best.values(), key=lambda x: x["similarity_score"], reverse=True)
 
 
 @app.post("/predict/search", response_model=SearchResponse)
@@ -247,26 +317,48 @@ async def predict_search(req: SearchRequest) -> SearchResponse:
 
     query_embedding = _encode_texts([req.query_text])
 
-    similarities = np.dot(chunk_embeddings, query_embedding.T).squeeze()
-    norms = np.linalg.norm(chunk_embeddings, axis=1) * np.linalg.norm(query_embedding)
-    cosine_scores = similarities / norms
+    # Try Qdrant first, then mock chunks, then empty fallback
+    raw_results: list[dict] | None = None
+    fallback_to_keyword = False
 
-    ranked_indices = np.argsort(cosine_scores)[::-1]
+    if not USE_MOCK_CHUNKS:
+        raw_results = _search_qdrant(query_embedding, req.top_k)
 
-    top_score = float(cosine_scores[ranked_indices[0]])
-    fallback_to_keyword = top_score < 0.3
+    if raw_results is None and USE_MOCK_CHUNKS:
+        raw_results = _search_mock(query_embedding, req.top_k)
 
-    results: list[SearchResult] = []
-    for idx in ranked_indices[: req.top_k]:
-        chunk = MOCK_CHUNKS[int(idx)]
-        results.append(
-            SearchResult(
-                document_id=chunk["document_id"],
-                chunk_index=chunk["chunk_index"],
-                chunk_text=chunk["text"],
-                similarity_score=round(float(cosine_scores[idx]), 4),
-            )
+    if raw_results is None:
+        # Qdrant unavailable and no mock mode — return empty fallback
+        inference_time_ms = int((time.perf_counter() - t0) * 1000)
+        return SearchResponse(
+            session_id=req.session_id,
+            query_text=req.query_text,
+            results=[],
+            fallback_to_keyword=True,
+            model_version=RETRIEVAL_MODEL_VERSION,
+            inference_time_ms=inference_time_ms,
         )
+
+    # Deduplicate to document level
+    deduped = _deduplicate_to_document(raw_results)
+
+    # Check similarity threshold
+    top_score = deduped[0]["similarity_score"] if deduped else 0.0
+    if top_score < SIMILARITY_THRESHOLD:
+        fallback_to_keyword = True
+
+    # Trim to top_k after dedup
+    deduped = deduped[: req.top_k]
+
+    results = [
+        SearchResult(
+            document_id=r["document_id"],
+            chunk_index=r["chunk_index"],
+            chunk_text=r["chunk_text"],
+            similarity_score=r["similarity_score"],
+        )
+        for r in deduped
+    ]
 
     inference_time_ms = int((time.perf_counter() - t0) * 1000)
 

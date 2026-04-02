@@ -17,7 +17,9 @@ RUN pip install --no-cache-dir \
     numpy \
     onnxruntime-gpu \
     "optimum[onnxruntime-gpu]" \
-    boto3
+    boto3 \
+    minio \
+    qdrant-client
 
 # Pre-download tokenizers and processor (no model weights — ONNX files are mounted)
 RUN python -c "\
@@ -26,6 +28,7 @@ AutoTokenizer.from_pretrained('sentence-transformers/all-mpnet-base-v2'); \
 TrOCRProcessor.from_pretrained('microsoft/trocr-small-handwritten')"
 
 COPY src/fastapi_app/app_ort.py /app/app_ort.py
+COPY src/fastapi_app/s3_utils.py /app/s3_utils.py
 
 WORKDIR /app
 
