@@ -2,11 +2,22 @@
 
 import argparse
 import asyncio
+import base64
+import io
 import json
 import statistics
 import time
 
 import aiohttp
+from PIL import Image
+
+
+def make_test_image_base64(width=224, height=224) -> str:
+    """Generate a base64-encoded test PNG image."""
+    img = Image.new("RGB", (width, height), "white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 async def send_request(session, url, payload):
@@ -50,13 +61,34 @@ async def benchmark_endpoint(url, payload, concurrency, num_requests):
     }
 
 
-async def main(base_url, concurrency_levels, num_requests, crop_s3_url):
+async def warmup(base_url, htr_payload, search_payload, n=3):
+    """Send a few warmup requests to avoid cold-start in measurements."""
+    async with aiohttp.ClientSession() as session:
+        for _ in range(n):
+            try:
+                async with session.post(f"{base_url}/predict/htr", json=htr_payload) as r:
+                    await r.read()
+            except Exception:
+                pass
+            try:
+                async with session.post(f"{base_url}/predict/search", json=search_payload) as r:
+                    await r.read()
+            except Exception:
+                pass
+
+
+async def main(base_url, concurrency_levels, num_requests, use_s3, crop_s3_url):
+    test_image_b64 = make_test_image_base64()
+
     htr_payload = {
         "document_id": "a3f7c2e1-9b4d-4e8a-b5c6-1234567890ab",
         "page_id": "b8e2d4f6-7a3c-4b1e-9d5f-abcdef012345",
         "region_id": "c9d3e5a7-6b2f-4c0d-8e4a-fedcba987654",
         "crop_s3_url": crop_s3_url,
     }
+    if not use_s3:
+        htr_payload["image_base64"] = test_image_b64
+
     search_payload = {
         "session_id": "d4e5f6a7-8b9c-4d0e-1f2a-3b4c5d6e7f8a",
         "query_text": "handwritten text recognition",
@@ -64,7 +96,16 @@ async def main(base_url, concurrency_levels, num_requests, crop_s3_url):
         "top_k": 5,
     }
 
-    all_results = {}
+    input_mode = "s3_url" if use_s3 else "base64"
+    print(f"Input mode: {input_mode}")
+    print(f"Target: {base_url}")
+    print(f"Requests per level: {num_requests}")
+    print(f"Concurrency levels: {concurrency_levels}")
+
+    print("\nWarming up...", flush=True)
+    await warmup(base_url, htr_payload, search_payload)
+
+    all_results = {"input_mode": input_mode}
 
     for endpoint, payload in [
         ("/predict/htr", htr_payload),
@@ -98,16 +139,16 @@ if __name__ == "__main__":
     parser.add_argument("--requests", type=int, default=50)
     parser.add_argument("--concurrency", type=str, default="1,4,8,16")
     parser.add_argument("--output", type=str, help="Save JSON results to file")
+    parser.add_argument("--use-s3", action="store_true",
+                        help="Use S3 URL instead of base64 (requires MinIO)")
     parser.add_argument(
-        "--crop-s3-url",
-        type=str,
+        "--crop-s3-url", type=str,
         default="s3://paperless-images/documents/a3f7c2e1/regions/test.png",
-        help="S3/MinIO URL for the test HTR image",
     )
     args = parser.parse_args()
 
     levels = [int(x) for x in args.concurrency.split(",")]
-    results = asyncio.run(main(args.url, levels, args.requests, args.crop_s3_url))
+    results = asyncio.run(main(args.url, levels, args.requests, args.use_s3, args.crop_s3_url))
 
     if args.output:
         with open(args.output, "w") as f:
