@@ -2,21 +2,11 @@
 
 import argparse
 import asyncio
-import base64
-import io
 import json
 import statistics
 import time
 
 import aiohttp
-from PIL import Image
-
-
-def make_test_image_b64() -> str:
-    img = Image.new("RGB", (224, 224), "white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode()
 
 
 async def send_request(session, url, payload):
@@ -60,15 +50,19 @@ async def benchmark_endpoint(url, payload, concurrency, num_requests):
     }
 
 
-async def main(base_url, concurrency_levels, num_requests):
-    test_image = make_test_image_b64()
+async def main(base_url, concurrency_levels, num_requests, crop_s3_url):
     htr_payload = {
-        "image": test_image,
-        "document_id": 1,
-        "page_number": 1,
-        "region_id": 1,
+        "document_id": "a3f7c2e1-9b4d-4e8a-b5c6-1234567890ab",
+        "page_id": "b8e2d4f6-7a3c-4b1e-9d5f-abcdef012345",
+        "region_id": "c9d3e5a7-6b2f-4c0d-8e4a-fedcba987654",
+        "crop_s3_url": crop_s3_url,
     }
-    search_payload = {"query": "handwritten text recognition", "top_k": 5}
+    search_payload = {
+        "session_id": "d4e5f6a7-8b9c-4d0e-1f2a-3b4c5d6e7f8a",
+        "query_text": "handwritten text recognition",
+        "user_id": "e5f6a7b8-9c0d-4e1f-2a3b-4c5d6e7f8a9b",
+        "top_k": 5,
+    }
 
     all_results = {}
 
@@ -104,10 +98,16 @@ if __name__ == "__main__":
     parser.add_argument("--requests", type=int, default=50)
     parser.add_argument("--concurrency", type=str, default="1,4,8,16")
     parser.add_argument("--output", type=str, help="Save JSON results to file")
+    parser.add_argument(
+        "--crop-s3-url",
+        type=str,
+        default="s3://paperless-images/documents/a3f7c2e1/regions/test.png",
+        help="S3/MinIO URL for the test HTR image",
+    )
     args = parser.parse_args()
 
     levels = [int(x) for x in args.concurrency.split(",")]
-    results = asyncio.run(main(args.url, levels, args.requests))
+    results = asyncio.run(main(args.url, levels, args.requests, args.crop_s3_url))
 
     if args.output:
         with open(args.output, "w") as f:

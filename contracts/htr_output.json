@@ -1,7 +1,8 @@
 {
-  "document_id": 1,
-  "page_number": 1,
-  "region_id": 1,
-  "transcription": "example transcribed text",
-  "confidence": 0.95
+  "region_id": "c9d3e5a7-6b2f-4c0d-8e4a-fedcba987654",
+  "htr_output": "Please review and approve by Friday",
+  "htr_confidence": 0.87,
+  "htr_flagged": false,
+  "model_version": "htr_v1",
+  "inference_time_ms": 42
 }
