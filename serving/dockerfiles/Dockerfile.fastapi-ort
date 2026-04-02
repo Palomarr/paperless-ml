@@ -16,12 +16,13 @@ RUN pip install --no-cache-dir \
     Pillow \
     numpy \
     onnxruntime-gpu \
-    "optimum[onnxruntime-gpu]"
+    "optimum[onnxruntime-gpu]" \
+    boto3
 
 # Pre-download tokenizers and processor (no model weights — ONNX files are mounted)
 RUN python -c "\
 from transformers import AutoTokenizer, TrOCRProcessor; \
-AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2'); \
+AutoTokenizer.from_pretrained('sentence-transformers/all-mpnet-base-v2'); \
 TrOCRProcessor.from_pretrained('microsoft/trocr-small-handwritten')"
 
 COPY src/fastapi_app/app_ort.py /app/app_ort.py

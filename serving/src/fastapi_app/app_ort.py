@@ -36,10 +36,10 @@ else:
 # Model loading
 # ---------------------------------------------------------------------------
 
-# MiniLM bi-encoder via ORT
+# mpnet bi-encoder via ORT
 biencoder_session = ort.InferenceSession(BIENCODER_PATH, providers=providers)
 biencoder_tokenizer = AutoTokenizer.from_pretrained(
-    "sentence-transformers/all-MiniLM-L6-v2"
+    "sentence-transformers/all-mpnet-base-v2"
 )
 
 # TrOCR via optimum ORT wrapper
@@ -143,7 +143,7 @@ def _encode_texts(texts: list[str]) -> np.ndarray:
     outputs = biencoder_session.run(
         None, {"input_ids": input_ids, "attention_mask": attention_mask}
     )
-    # outputs[0] is (batch, seq, 384) — mean pool over sequence dim
+    # outputs[0] is (batch, seq, 768) — mean pool over sequence dim
     token_embeddings = outputs[0]
     # Mask padding tokens before pooling
     mask = attention_mask[:, :, np.newaxis].astype(np.float32)

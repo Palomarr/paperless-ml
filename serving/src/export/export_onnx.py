@@ -13,10 +13,10 @@ from transformers import TrOCRProcessor
 
 
 def export_biencoder(output_dir: str) -> str:
-    """Export bi-encoder (all-MiniLM-L6-v2) to ONNX."""
+    """Export bi-encoder (all-mpnet-base-v2) to ONNX."""
     print("=== Exporting bi-encoder to ONNX ===")
 
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
     transformer = model[0].auto_model
     tokenizer = model.tokenizer
 
@@ -47,10 +47,10 @@ def export_biencoder(output_dir: str) -> str:
     dummy_ids = np.zeros((1, 128), dtype=np.int64)
     dummy_mask = np.ones((1, 128), dtype=np.int64)
     outputs = session.run(None, {"input_ids": dummy_ids, "attention_mask": dummy_mask})
-    # The transformer outputs (batch, seq, hidden); take mean pooling to get (1, 384)
+    # The transformer outputs (batch, seq, hidden); take mean pooling to get (1, 768)
     token_embeddings = outputs[0]
     embedding = np.mean(token_embeddings, axis=1)
-    assert embedding.shape == (1, 384), f"Expected (1, 384), got {embedding.shape}"
+    assert embedding.shape == (1, 768), f"Expected (1, 768), got {embedding.shape}"
     print(f"Verification passed: output shape {embedding.shape}")
 
     return output_path
@@ -95,7 +95,7 @@ def validate_exports(output_dir: str):
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(
-        "sentence-transformers/all-MiniLM-L6-v2"
+        "sentence-transformers/all-mpnet-base-v2"
     )
     inputs = tokenizer(
         "This is a test sentence.",
@@ -113,7 +113,7 @@ def validate_exports(output_dir: str):
     )
     token_embeddings = outputs[0]
     embedding = np.mean(token_embeddings, axis=1)
-    assert embedding.shape == (1, 384), f"Expected (1, 384), got {embedding.shape}"
+    assert embedding.shape == (1, 768), f"Expected (1, 768), got {embedding.shape}"
     assert embedding.dtype == np.float32, f"Expected float32, got {embedding.dtype}"
     print(f"  Shape: {embedding.shape}, dtype: {embedding.dtype} -- OK")
 

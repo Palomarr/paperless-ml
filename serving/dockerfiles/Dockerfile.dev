@@ -1,0 +1,19 @@
+# Dev container for running benchmarks, exports, and quantization
+# No GPU runtime needed — benchmarks hit the serving container over HTTP
+FROM python:3.10-slim
+
+RUN pip install --no-cache-dir \
+    aiohttp \
+    onnxruntime \
+    onnxruntime-gpu \
+    "optimum[onnxruntime]" \
+    "transformers<4.50" \
+    sentence-transformers \
+    sentencepiece \
+    protobuf \
+    safetensors \
+    numpy \
+    Pillow \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
+WORKDIR /workspace

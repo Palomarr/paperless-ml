@@ -30,7 +30,7 @@ trocr_model = VisionEncoderDecoderModel.from_pretrained(
 trocr_model.eval()
 
 # Sentence-Transformers – semantic search
-st_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=device)
+st_model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2", device=device)
 st_model.eval()
 
 # ---------------------------------------------------------------------------

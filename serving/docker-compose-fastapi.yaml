@@ -20,3 +20,13 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+  dev:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.dev
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    network_mode: host
+    profiles: ["dev"]

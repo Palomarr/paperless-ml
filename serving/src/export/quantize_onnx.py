@@ -9,7 +9,7 @@ from onnxruntime.quantization import QuantType, quantize_dynamic
 
 
 def quantize_biencoder(input_path: str, output_path: str):
-    """Dynamic quantization for MiniLM bi-encoder."""
+    """Dynamic quantization for mpnet bi-encoder."""
     print("=== Quantizing bi-encoder ===")
     quantize_dynamic(
         model_input=input_path,
