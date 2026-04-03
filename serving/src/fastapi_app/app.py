@@ -56,10 +56,10 @@ except Exception:
 
 
 class HTRRequest(BaseModel):
-    document_id: str
-    page_id: str
-    region_id: str
-    crop_s3_url: str
+    document_id: str = "unknown"
+    page_id: str = "unknown"
+    region_id: str = "unknown"
+    crop_s3_url: str = ""
     image_width: int | None = None
     image_height: int | None = None
     image_format: str | None = None
@@ -79,9 +79,9 @@ class HTRResponse(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    session_id: str
+    session_id: str = "anonymous"
     query_text: str
-    user_id: str
+    user_id: str = "anonymous"
     top_k: int = 5
 
 
