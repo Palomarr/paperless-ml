@@ -288,7 +288,6 @@ class HTRDeployment:
         active = ort.get_available_providers()
         if "CUDAExecutionProvider" not in active:
             providers = ["CPUExecutionProvider"]
-        self.device = "cuda" if "CUDAExecutionProvider" in active else "cpu"
 
         from optimum.onnxruntime import ORTModelForVision2Seq
         self.model = ORTModelForVision2Seq.from_pretrained(HTR_DIR, provider=providers[0])

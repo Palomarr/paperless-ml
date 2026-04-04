@@ -7,10 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ln -sf /usr/bin/python3 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only PyTorch first (only needed for TrOCR generate() loop,
-# actual inference uses ORT GPU). Avoids CUDA driver version conflicts.
+# Install PyTorch with CUDA 11.8 (needed for TrOCR generate() loop via optimum)
 RUN pip install --no-cache-dir \
-    torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 RUN pip install --no-cache-dir \
     "ray[serve]" \
