@@ -105,9 +105,9 @@ benchmark_fastapi() {
   fi
   docker compose -f "$compose_file" up -d
 
-  log "Waiting for FastAPI to be ready..."
-  if ! wait_for_http "http://localhost:8000/health" 120; then
-    err "FastAPI failed to start for $config_name"
+  log "Waiting for server to be ready..."
+  if ! wait_for_http "http://localhost:8000/health" 240; then
+    err "Server failed to start for $config_name"
     docker compose -f "$compose_file" logs --tail=30
     teardown "$compose_file"
     return 1
