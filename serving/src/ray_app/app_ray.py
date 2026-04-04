@@ -375,4 +375,6 @@ class APIIngress:
 
 search = SearchDeployment.bind()
 htr = HTRDeployment.bind()
-app = APIIngress.bind(htr, search)
+app = APIIngress.options(
+    route_prefix="/",
+).bind(htr, search)
