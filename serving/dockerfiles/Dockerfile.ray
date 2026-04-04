@@ -15,11 +15,11 @@ RUN pip install --no-cache-dir \
     safetensors \
     Pillow \
     numpy \
-    "onnxruntime-gpu==1.17.1" \
-    "optimum[onnxruntime]" \
+    optimum \
     boto3 \
     minio \
-    qdrant-client
+    qdrant-client \
+    && pip install --no-cache-dir "onnxruntime-gpu==1.17.1"
 
 # Pre-download tokenizers and processor (no model weights — ONNX files are mounted)
 RUN python -c "\
