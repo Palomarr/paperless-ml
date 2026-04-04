@@ -120,7 +120,6 @@ MOCK_CHUNKS: list[dict] = [
 # ---------------------------------------------------------------------------
 
 @serve.deployment(
-    num_replicas=1,
     ray_actor_options={"num_gpus": 0.5},
     autoscaling_config={
         "min_replicas": 1,
@@ -276,7 +275,6 @@ class SearchDeployment:
 # ---------------------------------------------------------------------------
 
 @serve.deployment(
-    num_replicas=1,
     ray_actor_options={"num_gpus": 0.5},
     autoscaling_config={
         "min_replicas": 1,
