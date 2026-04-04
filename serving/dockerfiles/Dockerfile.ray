@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir \
     protobuf \
     safetensors \
     Pillow \
-    numpy \
+    "numpy<2" \
     optimum \
     boto3 \
     minio \
