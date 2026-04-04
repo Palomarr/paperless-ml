@@ -56,6 +56,18 @@ log()     { echo -e "\033[0;32m$*\033[0m"; }
 section() { echo -e "\n\033[0;36m\033[1m=== $* ===\033[0m\n"; }
 err()     { echo -e "\033[0;31mERROR: $*\033[0m" >&2; }
 
+# Ensure external network exists (referenced by compose files)
+docker network create paperless-net 2>/dev/null || true
+
+# Use existing venv from setup_serving.sh; install benchmark deps if missing
+VENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+  err "No venv found at $VENV_DIR — run setup_serving.sh first"
+  exit 1
+fi
+"$VENV_DIR/bin/pip" install --quiet aiohttp Pillow requests 2>/dev/null
+PYTHON="$VENV_DIR/bin/python"
+
 wait_for_http() {
   local url="$1" timeout="${2:-120}"
   for i in $(seq 1 "$timeout"); do
@@ -87,8 +99,8 @@ benchmark_fastapi() {
 
   # Build and launch
   if [[ "$SKIP_BUILD" == false ]]; then
-    log "Building..."
-    docker compose -f "$compose_file" build --quiet 2>&1 | tail -1
+    log "Building $config_name..."
+    docker compose -f "$compose_file" build --progress=plain 2>&1
   fi
   docker compose -f "$compose_file" up -d
 
@@ -102,7 +114,7 @@ benchmark_fastapi() {
   log "Server ready."
 
   # Run benchmark
-  python3 benchmarks/benchmark_fastapi.py \
+  "$PYTHON" benchmarks/benchmark_fastapi.py \
     --url "http://localhost:8000" \
     --requests "$REQUESTS" \
     --concurrency "$CONCURRENCY" \
@@ -143,25 +155,40 @@ benchmark_triton() {
   curl -s localhost:8000/v2/models/htr_model | python3 -m json.tool 2>/dev/null || true
   curl -s localhost:8000/v2/models/search_model | python3 -m json.tool 2>/dev/null || true
 
+  # Convert comma-separated concurrency to array
+  IFS=',' read -ra CONC_LEVELS <<< "$CONCURRENCY"
+
   # Benchmark search_model
   log ""
   log ">>> search_model (bi-encoder)"
-  docker run --rm --net=host "$TRITON_SDK_IMAGE" \
-    perf_analyzer -u localhost:8000 -m search_model \
-    -b 1 --shape input_ids:128 --shape attention_mask:128 \
-    --concurrency-range "$CONCURRENCY" \
-    --measurement-interval "$TRITON_MEASUREMENT_INTERVAL" \
-    -f /dev/stdout 2>&1 | tee "$outdir/search_model.csv"
+  echo "Concurrency,Inferences/Second,Client Send,Network+Server Send/Recv,Server Queue,Server Compute Input,Server Compute Infer,Server Compute Output,Client Recv,p50 latency,p90 latency,p95 latency,p99 latency" \
+    > "$outdir/search_model.csv"
+  for c in "${CONC_LEVELS[@]}"; do
+    log "  concurrency=$c"
+    docker run --rm --net=host "$TRITON_SDK_IMAGE" \
+      perf_analyzer -u localhost:8000 -m search_model \
+      -b 1 --shape input_ids:128 --shape attention_mask:128 \
+      --concurrency-range "$c" \
+      --measurement-interval "$TRITON_MEASUREMENT_INTERVAL" \
+      -f /dev/stdout 2>&1 | tee -a "$outdir/search_model_full.log" | \
+      tail -1 >> "$outdir/search_model.csv"
+  done
 
   # Benchmark htr_model
   log ""
   log ">>> htr_model (TrOCR encoder)"
-  docker run --rm --net=host "$TRITON_SDK_IMAGE" \
-    perf_analyzer -u localhost:8000 -m htr_model \
-    -b 1 --shape pixel_values:3,384,384 \
-    --concurrency-range "$CONCURRENCY" \
-    --measurement-interval "$TRITON_MEASUREMENT_INTERVAL" \
-    -f /dev/stdout 2>&1 | tee "$outdir/htr_model.csv"
+  echo "Concurrency,Inferences/Second,Client Send,Network+Server Send/Recv,Server Queue,Server Compute Input,Server Compute Infer,Server Compute Output,Client Recv,p50 latency,p90 latency,p95 latency,p99 latency" \
+    > "$outdir/htr_model.csv"
+  for c in "${CONC_LEVELS[@]}"; do
+    log "  concurrency=$c"
+    docker run --rm --net=host "$TRITON_SDK_IMAGE" \
+      perf_analyzer -u localhost:8000 -m htr_model \
+      -b 1 --shape pixel_values:3,384,384 \
+      --concurrency-range "$c" \
+      --measurement-interval "$TRITON_MEASUREMENT_INTERVAL" \
+      -f /dev/stdout 2>&1 | tee -a "$outdir/htr_model_full.log" | \
+      tail -1 >> "$outdir/htr_model.csv"
+  done
 
   teardown "$compose_file"
   log "Saved: $outdir/search_model.csv, $outdir/htr_model.csv"

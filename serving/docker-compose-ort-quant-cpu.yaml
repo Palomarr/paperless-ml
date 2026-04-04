@@ -52,8 +52,13 @@ services:
       - QDRANT_PORT=6333
     volumes:
       - ./onnx_models_quantized:/models:ro
-    deploy:
-      resources:
     networks:
       - paperless-net
+
+volumes:
+  minio_data:
+
+networks:
+  paperless-net:
+    external: true
 
