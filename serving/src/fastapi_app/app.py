@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import io
 import math
@@ -15,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 # ---------------------------------------------------------------------------
-# Model loading (module level)
+# Model loading
 # ---------------------------------------------------------------------------
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -36,7 +34,7 @@ st_model.eval()
 from s3_utils import download_image_from_s3
 
 # ---------------------------------------------------------------------------
-# Qdrant client (lazy — may not be available)
+# Qdrant client
 # ---------------------------------------------------------------------------
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "qdrant")
@@ -51,7 +49,7 @@ except Exception:
     pass
 
 # ---------------------------------------------------------------------------
-# Pydantic models  (match data-team JSON contracts exactly)
+# Pydantic models
 # ---------------------------------------------------------------------------
 
 
@@ -65,7 +63,7 @@ class HTRRequest(BaseModel):
     image_format: str | None = None
     source: str | None = None
     uploaded_at: str | None = None
-    # Fallback: provide base64-encoded image to skip S3 download (benchmarking)
+    # Fallback: provide base64-encoded image to skip S3 download
     image_base64: str | None = None
 
 
@@ -102,7 +100,7 @@ class SearchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Mock document index (for benchmarking when USE_MOCK_CHUNKS=true)
+# Mock document index
 # ---------------------------------------------------------------------------
 
 USE_MOCK_CHUNKS = os.environ.get("USE_MOCK_CHUNKS", "true").lower() == "true"
@@ -152,15 +150,8 @@ async def health():
 
 @app.post("/predict/htr", response_model=HTRResponse)
 async def predict_htr(req: HTRRequest) -> HTRResponse:
-    # -----------------------------------------------------------------------
-    # A5 note: Elnath's htr_features.py preprocesses crops as grayscale,
-    # resized to [1, 128, W] with [-1, 1] normalization (pixel/255 - 0.5)/0.5.
-    # Our TrOCR model uses its own AutoProcessor (3-ch RGB, ImageNet norm,
-    # 384x384 resize), so we do NOT replicate Elnath's preprocessing here —
-    # the model dictates preprocessing, not the upstream feature pipeline.
-    # -----------------------------------------------------------------------
 
-    # A3: Try image_base64 fallback first, then S3 download
+    # Try image_base64 fallback first, then S3 download
     image: Image.Image | None = None
     if req.image_base64:
         try:

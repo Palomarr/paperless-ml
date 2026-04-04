@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# ===========================================================================
-# demo_triton.sh — Triton demo for recording (Segment 2)
-#
-# Run this during screen recording. It:
-#   1. Shows the Triton model repo structure and configs
-#   2. Launches Triton and waits for READY
-#   3. Verifies both models via REST API
-#   4. Runs perf_analyzer for both models
-#   5. Tears down Triton
-#
-# Usage:
-#   cd ~/paperless-ml/serving
-#   bash demo_triton.sh
-# ===========================================================================
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -28,14 +14,14 @@ NC='\033[0m'
 section() { echo -e "\n${CYAN}${BOLD}=== $* ===${NC}\n"; sleep 1; }
 log()     { echo -e "${GREEN}$*${NC}"; }
 
-# -------------------------------------------------------------------
+
 # Clean slate
-# -------------------------------------------------------------------
+
 docker compose -f "$COMPOSE_FILE" down 2>/dev/null || true
 
-# -------------------------------------------------------------------
+
 # 1. Show model repo
-# -------------------------------------------------------------------
+
 section "Triton model repository"
 
 find triton_model_repo -type f
@@ -51,9 +37,9 @@ log "--- search_model config ---"
 cat triton_model_repo/search_model/config.pbtxt
 sleep 2
 
-# -------------------------------------------------------------------
+
 # 2. Launch Triton
-# -------------------------------------------------------------------
+
 section "Launching Triton Inference Server"
 
 docker compose -f "$COMPOSE_FILE" up -d
@@ -70,9 +56,9 @@ for i in $(seq 1 90); do
 done
 sleep 1
 
-# -------------------------------------------------------------------
+
 # 3. Verify models via REST API
-# -------------------------------------------------------------------
+
 section "Model verification"
 
 echo "htr_model:"
@@ -82,9 +68,9 @@ echo "search_model:"
 curl -s localhost:8000/v2/models/search_model | python3 -m json.tool
 sleep 2
 
-# -------------------------------------------------------------------
+
 # 4. Benchmark with perf_analyzer
-# -------------------------------------------------------------------
+
 section "Benchmark: HTR model (perf_analyzer)"
 
 docker run --rm --net=host "$SDK_IMAGE" \
@@ -105,9 +91,9 @@ docker run --rm --net=host "$SDK_IMAGE" \
 
 sleep 3
 
-# -------------------------------------------------------------------
+
 # 5. Tear down
-# -------------------------------------------------------------------
+
 section "Tearing down Triton"
 
 docker compose -f "$COMPOSE_FILE" down

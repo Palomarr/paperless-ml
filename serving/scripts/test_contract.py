@@ -1,8 +1,3 @@
-"""
-Lightweight integration test for HTR and Search serving endpoints.
-Validates responses against the contract JSON schemas in contracts/.
-"""
-
 import argparse
 import base64
 import io
@@ -16,8 +11,6 @@ import requests
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONTRACTS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "contracts"))
-
-# ── Type mapping used by the validator ──────────────────────────────────────
 
 TYPE_MAP = {
     str: "str",
@@ -34,7 +27,7 @@ def infer_type(value):
     return type(value)
 
 
-# ── Tiny PNG generator (10x10 white, no Pillow needed) ──────────────────────
+# Tiny PNG generator
 
 def make_tiny_png(width=10, height=10):
     """Return bytes for a minimal white PNG image."""
@@ -55,7 +48,7 @@ def make_tiny_png(width=10, height=10):
     return header + ihdr + idat + iend
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
+# Helpers
 
 def load_contract(name):
     path = os.path.join(CONTRACTS_DIR, name)
@@ -130,8 +123,6 @@ def test_endpoint(base_url, path, payload, expected_output, label):
     print(f"  PASS - all fields present with correct types")
     return True
 
-
-# ── Main ────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Contract integration tests for serving endpoints")

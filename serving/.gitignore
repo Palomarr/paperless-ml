@@ -3,3 +3,4 @@ venv/
 *.onnx.data
 __pycache__/
 *.pyc
+onnx_models_quantized/

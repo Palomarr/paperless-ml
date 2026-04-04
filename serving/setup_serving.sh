@@ -10,14 +10,6 @@
 # Usage:
 #   cd ~/paperless-ml/serving
 #   bash setup_serving.sh
-#
-# What this script does:
-#   1. Pulls Triton images (in background)
-#   2. Creates Python venv and exports ONNX models
-#   3. Populates Triton model repo (with IR version fix)
-#   4. Generates quantized models
-#   5. Creates Docker network and builds FastAPI image
-#   6. Runs a smoke test on both serving stacks
 # ===========================================================================
 
 set -euo pipefail

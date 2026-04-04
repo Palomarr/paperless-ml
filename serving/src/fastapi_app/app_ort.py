@@ -72,7 +72,7 @@ trocr_processor = TrOCRProcessor.from_pretrained(
 )
 
 # ---------------------------------------------------------------------------
-# Qdrant client (lazy — only used when USE_MOCK_CHUNKS is False)
+# Qdrant client
 # ---------------------------------------------------------------------------
 
 qdrant_client = None
@@ -84,7 +84,7 @@ except Exception:
     logger.warning("qdrant-client not available; will use mock chunks or fallback")
 
 # ---------------------------------------------------------------------------
-# Pydantic models — match data-team JSON contracts exactly
+# Pydantic models
 # ---------------------------------------------------------------------------
 
 
@@ -135,7 +135,7 @@ class SearchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Mock document index (for benchmarking without Qdrant)
+# Mock document index
 # ---------------------------------------------------------------------------
 
 MOCK_CHUNKS: list[dict] = [
@@ -167,7 +167,7 @@ def _encode_texts(texts: list[str]) -> np.ndarray:
     outputs = biencoder_session.run(
         None, {"input_ids": input_ids, "attention_mask": attention_mask}
     )
-    # outputs[0] is (batch, seq, 768) — mean pool over sequence dim
+    # outputs[0] is (batch, seq, 768)
     token_embeddings = outputs[0]
     # Mask padding tokens before pooling
     mask = attention_mask[:, :, np.newaxis].astype(np.float32)
