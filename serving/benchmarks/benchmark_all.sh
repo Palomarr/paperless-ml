@@ -31,10 +31,11 @@ declare -A COMPOSE_FILES=(
   [ort-quant]="docker-compose-ort-quant.yaml"
   [ort-quant-cpu]="docker-compose-ort-quant-cpu.yaml"
   [triton]="docker-compose-triton.yaml"
+  [ray]="docker-compose-ray.yaml"
 )
 
 # Order matters for the table
-ALL_CONFIGS="fastapi ort ort-quant ort-quant-cpu triton"
+ALL_CONFIGS="fastapi ort ort-quant ort-quant-cpu triton ray"
 SELECTED_CONFIGS="$ALL_CONFIGS"
 
 # ── Parse args ────────────────────────────────────────────────────
