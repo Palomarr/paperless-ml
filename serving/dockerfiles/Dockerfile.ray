@@ -35,4 +35,6 @@ ENV ONNX_DIR=/models
 
 EXPOSE 8000
 
-CMD ["serve", "run", "app_ray:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV RAY_SERVE_HTTP_HOST=0.0.0.0
+ENV RAY_SERVE_HTTP_PORT=8000
+CMD ["serve", "run", "app_ray:app"]
