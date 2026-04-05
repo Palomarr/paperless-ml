@@ -275,7 +275,7 @@ class SearchDeployment:
 # ---------------------------------------------------------------------------
 
 @serve.deployment(
-    ray_actor_options={"num_gpus": 0.5},
+    ray_actor_options={"num_cpus": 2},
     autoscaling_config={
         "min_replicas": 1,
         "max_replicas": 2,
@@ -284,13 +284,15 @@ class SearchDeployment:
 )
 class HTRDeployment:
     def __init__(self):
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        active = ort.get_available_providers()
-        if "CUDAExecutionProvider" not in active:
-            providers = ["CPUExecutionProvider"]
-
+        # HTR uses CPU provider: the autoregressive decode loop runs in PyTorch
+        # (CPU), so the ORT encoder also runs on CPU to avoid GPU↔CPU transfers.
+        # The search deployment is where GPU batching matters.
         from optimum.onnxruntime import ORTModelForVision2Seq
-        self.model = ORTModelForVision2Seq.from_pretrained(HTR_DIR, provider=providers[0])
+        self.model = ORTModelForVision2Seq.from_pretrained(
+            HTR_DIR,
+            provider="CPUExecutionProvider",
+            use_io_binding=False,
+        )
         self.processor = TrOCRProcessor.from_pretrained(
             "microsoft/trocr-small-handwritten", use_fast=False
         )
