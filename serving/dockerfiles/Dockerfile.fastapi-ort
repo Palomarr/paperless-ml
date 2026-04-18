@@ -19,7 +19,8 @@ RUN pip install --no-cache-dir \
     "optimum[onnxruntime-gpu]" \
     boto3 \
     minio \
-    qdrant-client
+    qdrant-client \
+    prometheus-fastapi-instrumentator
 
 # Pre-download tokenizers and processor (no model weights — ONNX files are mounted)
 RUN python -c "\

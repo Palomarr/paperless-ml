@@ -101,7 +101,7 @@ def htr_transcribe(self, document_id: int) -> None:
             "image_base64": _encode_png_b64(page_image),
         }
         try:
-            result = ml_client.post("/predict/htr", payload)
+            result = ml_client.post("/htr", payload)
         except Exception as exc:
             log.warning(
                 "htr_transcribe: doc %s page %s request failed: %s",
@@ -151,7 +151,7 @@ def encode_document(self, document_id: int) -> None:
         return
 
     payload = {"document_id": str(doc.pk), "text": doc.content}
-    result = ml_client.post("/encode", payload)
+    result = ml_client.post("/search/encode", payload)
     log.info(
         "encode_document: doc %s indexed %s chunks in Qdrant",
         doc.pk,

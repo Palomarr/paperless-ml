@@ -23,7 +23,8 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
     numpy \
     boto3 \
     minio \
-    qdrant-client
+    qdrant-client \
+    prometheus-fastapi-instrumentator
 
 # Pre-download model weights into the image
 RUN python -c "\

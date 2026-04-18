@@ -178,6 +178,28 @@ SIMILARITY_THRESHOLD = 0.4
 app = FastAPI(title="Paperless-ngx ML Serving")
 
 
+# Prometheus metrics — exposes /metrics with default HTTP histograms,
+# plus custom collectors for HTR confidence and search similarity.
+try:
+    from prometheus_client import Histogram
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    HTR_CONFIDENCE_HIST = Histogram(
+        "htr_confidence",
+        "TrOCR per-request confidence (geometric-mean of token probs)",
+        buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0),
+    )
+    SEARCH_SIMILARITY_HIST = Histogram(
+        "search_top_similarity",
+        "Top-1 cosine similarity score per /search/query call",
+        buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+    )
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+except Exception:
+    HTR_CONFIDENCE_HIST = None
+    SEARCH_SIMILARITY_HIST = None
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "device": device}
@@ -188,7 +210,7 @@ async def health():
 # ---------------------------------------------------------------------------
 
 
-@app.post("/predict/htr", response_model=HTRResponse)
+@app.post("/htr", response_model=HTRResponse)
 async def predict_htr(req: HTRRequest) -> HTRResponse:
 
     # Try image_base64 fallback first, then S3 download
@@ -244,6 +266,9 @@ async def predict_htr(req: HTRRequest) -> HTRResponse:
 
     avg_log_prob = sum(log_probs) / max(len(log_probs), 1)
     htr_confidence = round(math.exp(avg_log_prob), 4)
+
+    if HTR_CONFIDENCE_HIST is not None:
+        HTR_CONFIDENCE_HIST.observe(htr_confidence)
 
     inference_time_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -307,7 +332,7 @@ def _search_qdrant(query_embedding: np.ndarray, top_k: int) -> list[dict]:
     return deduped[:top_k]
 
 
-@app.post("/predict/search", response_model=SearchResponse)
+@app.post("/search/query", response_model=SearchResponse)
 async def predict_search(req: SearchRequest) -> SearchResponse:
     t0 = time.perf_counter()
 
@@ -337,6 +362,8 @@ async def predict_search(req: SearchRequest) -> SearchResponse:
     # Check similarity threshold
     if results_raw:
         max_score = max(r["similarity_score"] for r in results_raw)
+        if SEARCH_SIMILARITY_HIST is not None:
+            SEARCH_SIMILARITY_HIST.observe(max_score)
         if max_score < SIMILARITY_THRESHOLD:
             fallback_to_keyword = True
 
@@ -358,7 +385,7 @@ async def predict_search(req: SearchRequest) -> SearchResponse:
 # ---------------------------------------------------------------------------
 
 
-@app.post("/encode", response_model=EncodeResponse)
+@app.post("/search/encode", response_model=EncodeResponse)
 async def encode(req: EncodeRequest) -> EncodeResponse:
     if qdrant_client is None or _qdrant_models is None:
         raise HTTPException(status_code=503, detail="Qdrant unavailable")

@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir torch \
         numpy \
         boto3 \
         minio \
-        qdrant-client
+        qdrant-client \
+        prometheus-fastapi-instrumentator
 
 # Pre-download model weights into the image so first request is fast.
 # This inflates the image by ~1.5 GB but avoids cold-start latency and
