@@ -18,6 +18,52 @@ services:
       timeout: 3s
       retries: 20
 
+  # Observability: Prometheus scrapes fastapi + qdrant /metrics endpoints.
+  # Config at ops/prometheus/prometheus.yml.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Grafana dashboards. Datasource + dashboards auto-provisioned from ops/grafana/.
+  # Default login: admin / admin. Reachable at http://localhost:3000.
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
   # Vector store for semantic search. Collection created by qdrant-init.
   qdrant:
     image: qdrant/qdrant:v1.11.3
@@ -138,6 +184,8 @@ services:
 volumes:
   pg_data:
   qdrant_data:
+  prometheus_data:
+  grafana_data:
   paperless_data:
   paperless_media:
   paperless_consume:
