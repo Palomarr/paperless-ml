@@ -1,0 +1,54 @@
+# Overlay that attaches services to the shared paperless_ml_net bridge
+# network, enabling cross-stack integration with REDES01/paperless_data_integration
+# (the data role's htr_consumer and related workers).
+#
+# Standalone dev mode (no shared network):
+#   docker compose up -d
+#
+# Integrated mode (with data-role's consumers):
+#   ./scripts/create_network.sh
+#   docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d
+#
+# DNS aliases keep the data role's hardcoded hostnames working:
+#   - paperless-web  → also answers to paperless-webserver-1, webserver
+#   - ml-gateway     → also answers to fastapi_server
+
+services:
+  paperless-web:
+    networks:
+      default:
+      paperless_ml_net:
+        aliases:
+          - paperless-webserver-1
+          - webserver
+
+  ml-gateway:
+    networks:
+      default:
+      paperless_ml_net:
+        aliases:
+          - fastapi_server
+
+  postgres:
+    networks:
+      default:
+      paperless_ml_net:
+
+  minio:
+    networks:
+      default:
+      paperless_ml_net:
+
+  redpanda:
+    networks:
+      default:
+      paperless_ml_net:
+
+  qdrant:
+    networks:
+      default:
+      paperless_ml_net:
+
+networks:
+  paperless_ml_net:
+    external: true
