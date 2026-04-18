@@ -255,9 +255,38 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 11: corrections/queries/feedback events all publish ----------
+info "Checkpoint 11: corrections + queries + feedback events emitted"
+# Queries event already fired from checkpoint 8's /api/search/?query=integration.
+# Trigger the remaining two by POSTing a correction and a search_click feedback.
+LATEST_DOC_ID="$(curl -s -u admin:admin 'http://localhost:8000/api/documents/?ordering=-id&page_size=1' \
+    | python3 -c 'import sys,json;r=json.load(sys.stdin)["results"];print(r[0]["id"] if r else 0)' 2>/dev/null || echo 0)"
+if [[ "$LATEST_DOC_ID" -gt 0 ]]; then
+    curl -s -u admin:admin -X POST http://localhost:8000/api/ml/feedback/ \
+        -H 'Content-Type: application/json' \
+        -d "{\"document\": $LATEST_DOC_ID, \"kind\": \"htr_correction\", \"correction_text\": \"verify harness test\"}" >/dev/null
+    curl -s -u admin:admin -X POST http://localhost:8000/api/ml/feedback/ \
+        -H 'Content-Type: application/json' \
+        -d "{\"document\": $LATEST_DOC_ID, \"kind\": \"search_click\"}" >/dev/null
+    sleep 2
+fi
+ok_q=0; ok_c=0; ok_f=0
+wait_for_log paperless-web "published event to paperless.queries" 20 && ok_q=1
+wait_for_log paperless-web "published event to paperless.corrections" 20 && ok_c=1
+wait_for_log paperless-web "published event to paperless.feedback" 20 && ok_f=1
+if (( ok_q && ok_c && ok_f )); then
+    pass "All 3 downstream event types published (queries + corrections + feedback)"
+else
+    (( ok_q )) || fail "paperless.queries event missing"
+    (( ok_c )) || fail "paperless.corrections event missing"
+    (( ok_f )) || fail "paperless.feedback event missing"
+    docker compose logs --tail=80 paperless-web | tail -40 || true
+    exit 1
+fi
+
 # ---------- done ----------
 echo
-pass "All 10 checkpoints passed."
+pass "All 11 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
 echo "  Feedback API:  http://localhost:8000/api/ml/feedback/"
