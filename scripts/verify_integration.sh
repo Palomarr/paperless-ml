@@ -208,22 +208,29 @@ fi
 
 # ---------- checkpoint 9: Prometheus is scraping fastapi /metrics ----------
 info "Checkpoint 9: Prometheus scraping FastAPI metrics"
-# Wait up to 60s for Prometheus to scrape fastapi at least once
+# Polls /api/v1/targets and checks health=="up" for job=="fastapi". Uses the
+# plain /targets endpoint (no query params) to avoid URL-encoding issues.
 attempt=0
-target_up=0
+target_health=""
 while (( attempt < 30 )); do
-    target_up="$(curl -s 'http://localhost:9090/api/v1/query?query=up{job=\"fastapi\"}' 2>/dev/null \
-        | python3 -c 'import sys,json;d=json.load(sys.stdin);v=d.get(\"data\",{}).get(\"result\",[]);print(int(float(v[0][\"value\"][1])) if v else 0)' 2>/dev/null || echo 0)"
-    if [[ "$target_up" == "1" ]]; then
+    target_health="$(curl -s http://localhost:9090/api/v1/targets 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for t in d.get("data", {}).get("activeTargets", []):
+    if t.get("labels", {}).get("job") == "fastapi":
+        print(t.get("health", ""))
+        break
+' 2>/dev/null || echo "")"
+    if [[ "$target_health" == "up" ]]; then
         break
     fi
     sleep 2
     attempt=$(( attempt + 1 ))
 done
-if [[ "$target_up" == "1" ]]; then
-    pass "Prometheus reports up{job=\"fastapi\"}=1"
+if [[ "$target_health" == "up" ]]; then
+    pass "Prometheus reports fastapi target health=up"
 else
-    fail "Prometheus did not confirm fastapi target is up after 60s"
+    fail "Prometheus did not confirm fastapi target is up after 60s (got: ${target_health:-<empty>})"
     curl -s 'http://localhost:9090/api/v1/targets' | python3 -m json.tool | head -40 || true
     exit 1
 fi
