@@ -307,12 +307,14 @@ def _search_mock(query_embedding: np.ndarray, top_k: int) -> list[dict]:
 
 
 def _search_qdrant(query_embedding: np.ndarray, top_k: int) -> list[dict]:
-    """Search Qdrant, deduplicate to document level (best chunk per doc)."""
-    hits = qdrant_client.search(
+    """Search Qdrant, deduplicate to document level (best chunk per doc).
+    Uses query_points (qdrant-client >= 1.10); search() was removed in 1.17."""
+    response = qdrant_client.query_points(
         collection_name=QDRANT_COLLECTION,
-        query_vector=query_embedding.squeeze().tolist(),
+        query=query_embedding.squeeze().tolist(),
         limit=top_k * 3,  # over-fetch to allow dedup
     )
+    hits = response.points if hasattr(response, "points") else response
 
     # Deduplicate: keep best chunk per document_id
     best_per_doc: dict[str, dict] = {}
