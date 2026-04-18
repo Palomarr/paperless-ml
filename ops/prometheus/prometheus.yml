@@ -24,3 +24,10 @@ scrape_configs:
       - targets: ["qdrant:6333"]
         labels:
           service: qdrant
+
+  - job_name: redpanda
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["redpanda:9644"]
+        labels:
+          service: redpanda
