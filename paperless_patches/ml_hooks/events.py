@@ -76,7 +76,9 @@ def publish_upload_event(document) -> None:
         "mime_type": document.mime_type,
         "page_count": getattr(document, "page_count", None),
         "uploaded_at": document.created.isoformat() if document.created else None,
-        "source": "paperless_web",
+        # Must match the data-stack's documents.source CHECK constraint:
+        # ('user_upload', 'synthetic', 'test').
+        "source": "user_upload",
     }
     publish("paperless.uploads", event)
 
