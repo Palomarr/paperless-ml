@@ -27,7 +27,7 @@ services:
       dockerfile: dockerfiles/Dockerfile.fastapi-cpu
     restart: unless-stopped
     ports:
-      - "8080:8000"          # host 8080 -> container 8000 (curl from laptop)
+      - "8090:8000"          # host 8090 -> container 8000 (curl from laptop; 8080 taken by Bilibili proxy on Windows)
     environment:
       USE_MOCK_CHUNKS: "true"    # Qdrant arrives in Job 2; mock chunks for search until then
       QDRANT_HOST: qdrant
