@@ -4,8 +4,12 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-FASTAPI_BASE_URL = os.getenv("ML_FASTAPI_BASE_URL", "http://fastapi:8080")
-TIMEOUT_SECONDS = float(os.getenv("ML_FASTAPI_TIMEOUT", "30"))
+GATEWAY_URL = os.getenv("ML_GATEWAY_URL") or os.getenv(
+    "ML_FASTAPI_BASE_URL", "http://ml-gateway:8000",
+)
+TIMEOUT_SECONDS = float(
+    os.getenv("ML_GATEWAY_TIMEOUT") or os.getenv("ML_FASTAPI_TIMEOUT", "30"),
+)
 
 
 def _build_session() -> requests.Session:
@@ -27,7 +31,7 @@ _session = _build_session()
 
 
 def post(path: str, payload: dict) -> dict:
-    url = f"{FASTAPI_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
+    url = f"{GATEWAY_URL.rstrip('/')}/{path.lstrip('/')}"
     resp = _session.post(url, json=payload, timeout=TIMEOUT_SECONDS)
     resp.raise_for_status()
     return resp.json()

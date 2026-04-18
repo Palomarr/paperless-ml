@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the paperless-ngx + ml_hooks overlay integration end-to-end.
-# Runs 6 checkpoints against a locally-brought-up docker compose stack.
+# Runs 9 checkpoints against a locally-brought-up docker compose stack.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,17 +52,17 @@ fi
 
 info "Generating ml_hooks migrations if missing"
 if [[ ! -f paperless_patches/ml_hooks/migrations/0001_initial.py ]]; then
-    # Bring up db first so makemigrations (which checks nothing but runs Django setup) works
-    docker compose up -d db broker fastapi-stub >/dev/null
+    # Bring up postgres first so makemigrations (which checks nothing but runs Django setup) works
+    docker compose up -d postgres redis fastapi-stub >/dev/null
     # Wait briefly for DB
     for _ in {1..20}; do
-        docker compose exec -T db pg_isready -U paperless >/dev/null 2>&1 && break
+        docker compose exec -T postgres pg_isready -U paperless >/dev/null 2>&1 && break
         sleep 1
     done
-    # Use `run` so we don't depend on web being up; the webserver image has Django installed.
+    # Use `run` so we don't depend on web being up; the paperless-web image has Django installed.
     docker compose run --rm --no-deps \
-        -e PAPERLESS_DBHOST=db \
-        webserver python manage.py makemigrations ml_hooks --noinput \
+        -e PAPERLESS_DBHOST=postgres \
+        paperless-web python manage.py makemigrations ml_hooks --noinput \
         || warn "makemigrations returned non-zero (may be fine if already present)"
 fi
 
@@ -104,14 +104,14 @@ elif [[ "$probe_code" == "500" ]]; then
     pass "URL mounted (got 500 — likely missing migration; checkpoint 2 will catch)"
 else
     fail "GET /api/ml/feedback/ returned HTTP $probe_code after 120s — URL not mounted"
-    docker compose logs --tail=80 webserver || true
+    docker compose logs --tail=80 paperless-web || true
     exit 1
 fi
 
 # ---------- checkpoint 2: migration applied ----------
 info "Checkpoint 2: ml_hooks migration applied"
-if wait_for_log webserver "Applying ml_hooks\." 120 \
-   || docker compose exec -T webserver python manage.py showmigrations ml_hooks 2>/dev/null | grep -q "\[X\]"; then
+if wait_for_log paperless-web "Applying ml_hooks\." 120 \
+   || docker compose exec -T paperless-web python manage.py showmigrations ml_hooks 2>/dev/null | grep -q "\[X\]"; then
     pass "ml_hooks.0001_initial is applied"
 else
     fail "ml_hooks migration not applied — Feedback table likely missing"
@@ -120,7 +120,7 @@ fi
 
 # ---------- checkpoint 3: feedback endpoint reachable ----------
 info "Checkpoint 3: /api/ml/feedback/ responds 200"
-# Give the webserver a moment to finish Django startup if migration just applied
+# Give the paperless-web a moment to finish Django startup if migration just applied
 sleep 3
 http_code="$(curl -s -o /tmp/ml_feedback_body -w '%{http_code}' -u admin:admin http://localhost:8000/api/ml/feedback/ || echo 000)"
 if [[ "$http_code" == "200" ]]; then
@@ -149,25 +149,25 @@ fi
 
 # ---------- checkpoint 5: signal handler fired ----------
 info "Checkpoint 5: document_consumption_finished signal fired"
-if wait_for_log webserver "ml_hooks: consumption finished for doc" 180; then
+if wait_for_log paperless-web "ml_hooks: consumption finished for doc" 180; then
     pass "on_consumption_finished handler executed"
 else
     fail "Signal handler never fired — consume pipeline may have stalled"
-    docker compose logs --tail=120 webserver | tail -60 || true
+    docker compose logs --tail=120 paperless-web | tail -60 || true
     exit 1
 fi
 
 # ---------- checkpoint 6: celery tasks ran ----------
 info "Checkpoint 6: HTR + embed tasks completed"
 ok_htr=0; ok_embed=0
-if wait_for_log webserver "htr_transcribe: doc" 120; then ok_htr=1; fi
-if wait_for_log webserver "encode_document: doc" 120; then ok_embed=1; fi
+if wait_for_log paperless-web "htr_transcribe: doc" 120; then ok_htr=1; fi
+if wait_for_log paperless-web "encode_document: doc" 120; then ok_embed=1; fi
 if (( ok_htr && ok_embed )); then
     pass "Both Celery tasks ran end-to-end"
 else
     (( ok_htr ))   || fail "htr_transcribe never completed"
     (( ok_embed )) || fail "encode_document never completed"
-    docker compose logs --tail=150 webserver | tail -80 || true
+    docker compose logs --tail=150 paperless-web | tail -80 || true
     exit 1
 fi
 
@@ -190,7 +190,7 @@ if [[ "$count" -gt 0 ]]; then
     pass "Qdrant document_chunks contains $count vector(s)"
 else
     fail "No vectors in Qdrant after encode_document — upsert path may be broken"
-    docker compose logs --tail=60 fastapi || true
+    docker compose logs --tail=60 ml-gateway || true
     exit 1
 fi
 
@@ -206,9 +206,9 @@ else
     exit 1
 fi
 
-# ---------- checkpoint 9: Prometheus is scraping fastapi /metrics ----------
+# ---------- checkpoint 9: Prometheus is scraping ml-gateway /metrics ----------
 info "Checkpoint 9: Prometheus scraping FastAPI metrics"
-# Polls /api/v1/targets and checks health=="up" for job=="fastapi". Uses the
+# Polls /api/v1/targets and checks health=="up" for job=="ml-gateway". Uses the
 # plain /targets endpoint (no query params) to avoid URL-encoding issues.
 attempt=0
 target_health=""
@@ -217,7 +217,7 @@ while (( attempt < 30 )); do
 import sys, json
 d = json.load(sys.stdin)
 for t in d.get("data", {}).get("activeTargets", []):
-    if t.get("labels", {}).get("job") == "fastapi":
+    if t.get("labels", {}).get("job") == "ml-gateway":
         print(t.get("health", ""))
         break
 ' 2>/dev/null || echo "")"
@@ -228,9 +228,9 @@ for t in d.get("data", {}).get("activeTargets", []):
     attempt=$(( attempt + 1 ))
 done
 if [[ "$target_health" == "up" ]]; then
-    pass "Prometheus reports fastapi target health=up"
+    pass "Prometheus reports ml-gateway target health=up"
 else
-    fail "Prometheus did not confirm fastapi target is up after 60s (got: ${target_health:-<empty>})"
+    fail "Prometheus did not confirm ml-gateway target is up after 60s (got: ${target_health:-<empty>})"
     curl -s 'http://localhost:9090/api/v1/targets' | python3 -m json.tool | head -40 || true
     exit 1
 fi

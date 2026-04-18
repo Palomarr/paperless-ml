@@ -10,12 +10,12 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "FastAPI request rate (req/s)",
+      "title": "ml-gateway request rate (req/s)",
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{job=\"fastapi\"}[1m]))",
+          "expr": "sum(rate(http_requests_total{job=\"ml-gateway\"}[1m]))",
           "refId": "A"
         }
       ],
@@ -24,12 +24,12 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "FastAPI p95 latency",
+      "title": "ml-gateway p95 latency",
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"fastapi\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"ml-gateway\"}[5m])) by (le))",
           "refId": "A"
         }
       ],
@@ -56,11 +56,11 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "FastAPI up",
+      "title": "ml-gateway up",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "up{job=\"fastapi\"}", "refId": "A" }
+        { "expr": "up{job=\"ml-gateway\"}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -102,22 +102,22 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "FastAPI latency percentiles",
+      "title": "ml-gateway latency percentiles",
       "gridPos": { "x": 0, "y": 13, "w": 24, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"fastapi\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"ml-gateway\"}[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"fastapi\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"ml-gateway\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"fastapi\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"ml-gateway\"}[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         }

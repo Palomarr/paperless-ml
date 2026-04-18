@@ -1,9 +1,9 @@
 services:
-  broker:
+  redis:
     image: redis:7-alpine
     restart: unless-stopped
 
-  db:
+  postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -18,7 +18,7 @@ services:
       timeout: 3s
       retries: 20
 
-  # Observability: Prometheus scrapes fastapi + qdrant /metrics endpoints.
+  # Observability: Prometheus scrapes ml-gateway + qdrant /metrics endpoints.
   # Config at ops/prometheus/prometheus.yml.
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -103,7 +103,7 @@ services:
   # Real ML serving container. Built from serving/ — CPU-only for WSL/laptop
   # dev; the GPU variant (Dockerfile.fastapi) is used on Chameleon.
   # First build takes ~5–10 min (model download + pytorch-cpu install).
-  fastapi:
+  ml-gateway:
     build:
       context: ./serving
       dockerfile: dockerfiles/Dockerfile.fastapi-cpu
@@ -127,8 +127,8 @@ services:
       start_period: 90s      # first boot loads TrOCR + mpnet into memory
 
   # Fallback stub for fast iteration without building the real serving image.
-  # Opt-in: `docker compose --profile stub up -d fastapi-stub webserver ...`
-  # When using the stub, also override ML_FASTAPI_BASE_URL to point at it.
+  # Opt-in: `docker compose --profile stub up -d fastapi-stub paperless-web ...`
+  # When using the stub, also override ML_GATEWAY_URL to point at it.
   fastapi-stub:
     image: python:3.12-slim
     profiles: ["stub"]
@@ -145,24 +145,24 @@ services:
       timeout: 3s
       retries: 20
 
-  webserver:
+  paperless-web:
     image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
     restart: unless-stopped
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
-      broker:
+      redis:
         condition: service_started
-      fastapi:
+      ml-gateway:
         condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       PAPERLESS_APPS: "ml_hooks"
       PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
-      PAPERLESS_REDIS: "redis://broker:6379"
+      PAPERLESS_REDIS: "redis://redis:6379"
       PAPERLESS_DBENGINE: postgresql
-      PAPERLESS_DBHOST: db
+      PAPERLESS_DBHOST: postgres
       PAPERLESS_DBNAME: paperless
       PAPERLESS_DBUSER: paperless
       PAPERLESS_DBPASS: paperless
@@ -172,8 +172,8 @@ services:
       PAPERLESS_ADMIN_USER: admin
       PAPERLESS_ADMIN_PASSWORD: admin
       PAPERLESS_URL: "http://localhost:8000"
-      ML_FASTAPI_BASE_URL: "http://fastapi:8000"
-      ML_FASTAPI_TIMEOUT: "30"
+      ML_GATEWAY_URL: "http://ml-gateway:8000"
+      ML_GATEWAY_TIMEOUT: "30"
     volumes:
       - ./paperless_patches:/usr/src/paperless/patches
       - paperless_data:/usr/src/paperless/data

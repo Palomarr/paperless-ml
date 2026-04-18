@@ -11,10 +11,10 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  - job_name: fastapi
+  - job_name: ml-gateway
     metrics_path: /metrics
     static_configs:
-      - targets: ["fastapi:8000"]
+      - targets: ["ml-gateway:8000"]
         labels:
           service: ml-gateway
 
