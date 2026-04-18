@@ -18,8 +18,35 @@ services:
       timeout: 3s
       retries: 20
 
+  # Real ML serving container. Built from serving/ — CPU-only for WSL/laptop
+  # dev; the GPU variant (Dockerfile.fastapi) is used on Chameleon.
+  # First build takes ~5–10 min (model download + pytorch-cpu install).
+  fastapi:
+    build:
+      context: ./serving
+      dockerfile: dockerfiles/Dockerfile.fastapi-cpu
+    restart: unless-stopped
+    ports:
+      - "8080:8000"          # host 8080 -> container 8000 (curl from laptop)
+    environment:
+      USE_MOCK_CHUNKS: "true"    # Qdrant arrives in Job 2; mock chunks for search until then
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      HTR_MODEL_VERSION: htr_v1
+      RETRIEVAL_MODEL_VERSION: retrieval_v1
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 90s      # first boot loads TrOCR + mpnet into memory
+
+  # Fallback stub for fast iteration without building the real serving image.
+  # Opt-in: `docker compose --profile stub up -d fastapi-stub webserver ...`
+  # When using the stub, also override ML_FASTAPI_BASE_URL to point at it.
   fastapi-stub:
     image: python:3.12-slim
+    profiles: ["stub"]
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -41,7 +68,7 @@ services:
         condition: service_healthy
       broker:
         condition: service_started
-      fastapi-stub:
+      fastapi:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -60,8 +87,8 @@ services:
       PAPERLESS_ADMIN_USER: admin
       PAPERLESS_ADMIN_PASSWORD: admin
       PAPERLESS_URL: "http://localhost:8000"
-      ML_FASTAPI_BASE_URL: "http://fastapi-stub:8080"
-      ML_FASTAPI_TIMEOUT: "10"
+      ML_FASTAPI_BASE_URL: "http://fastapi:8000"
+      ML_FASTAPI_TIMEOUT: "30"
     volumes:
       - ./paperless_patches:/usr/src/paperless/patches
       - paperless_data:/usr/src/paperless/data

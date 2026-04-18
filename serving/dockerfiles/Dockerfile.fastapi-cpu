@@ -1,0 +1,46 @@
+# CPU-only FastAPI serving image for laptop/WSL integration testing.
+# Parallel to Dockerfile.fastapi (GPU/CUDA) used for Chameleon deployment.
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only PyTorch wheels — smaller + no CUDA runtime required.
+RUN pip install --no-cache-dir torch \
+        --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir \
+        fastapi \
+        "uvicorn[standard]" \
+        "transformers<4.50" \
+        sentence-transformers \
+        sentencepiece \
+        protobuf \
+        safetensors \
+        Pillow \
+        numpy \
+        boto3 \
+        minio \
+        qdrant-client
+
+# Pre-download model weights into the image so first request is fast.
+# This inflates the image by ~1.5 GB but avoids cold-start latency and
+# flaky HuggingFace fetches during container startup.
+RUN python -c "\
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel; \
+TrOCRProcessor.from_pretrained('microsoft/trocr-small-handwritten'); \
+VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-small-handwritten'); \
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
+
+COPY src/fastapi_app/app.py /app/app.py
+COPY src/fastapi_app/s3_utils.py /app/s3_utils.py
+
+WORKDIR /app
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=12 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

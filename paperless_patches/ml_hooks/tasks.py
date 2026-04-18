@@ -23,19 +23,13 @@ def htr_transcribe(self, document_id: int) -> None:
         log.warning("htr_transcribe: document %s vanished", document_id)
         return
 
-    # TODO(integration): replace stub with real page/region extraction.
-    # Contract: paperless_patches/../contracts/htr_input.json
-    payload = {"document_id": str(doc.pk)}
-    result = ml_client.post("/htr", payload)
-
-    text = result.get("htr_output", "").strip()
-    if not text:
-        return
-
-    merged = f"{doc.content or ''}\n{text}".strip()
-    flagged = result.get("htr_confidence", 1.0) < HTR_CONFIDENCE_FLAG_THRESHOLD
-    Document.objects.filter(pk=doc.pk).update(content=merged)
-    log.info("htr_transcribe: doc %s updated (flagged=%s)", doc.pk, flagged)
+    # Real page/region rasterization lands in Job 4. Until then we skip
+    # cleanly so the signal chain stays green during integration tests.
+    # Contract for the real payload: contracts/htr_input.json
+    log.info(
+        "htr_transcribe: doc %s skipped (awaiting image pipeline, Job 4)",
+        doc.pk,
+    )
 
 
 @shared_task(
@@ -49,6 +43,10 @@ def encode_document(self, document_id: int) -> None:
     doc = Document.objects.filter(pk=document_id).first()
     if doc is None or not doc.content:
         return
-    payload = {"document_id": str(doc.pk), "text": doc.content}
-    ml_client.post("/search/encode", payload)
-    log.info("encode_document: doc %s upserted to Qdrant", doc.pk)
+
+    # Real Qdrant upsert lands in Job 3 (needs the `/encode` endpoint on
+    # FastAPI and the Qdrant service in compose). Skip cleanly for now.
+    log.info(
+        "encode_document: doc %s skipped (awaiting Qdrant wiring, Job 3)",
+        doc.pk,
+    )
