@@ -66,8 +66,18 @@ if [[ ! -f paperless_patches/ml_hooks/migrations/0001_initial.py ]]; then
         || warn "makemigrations returned non-zero (may be fine if already present)"
 fi
 
+# Detect whether the shared network overlay is already in use. If it is,
+# keep it across the up -d call so we don't detach our services from
+# paperless_ml_net while verifying.
+COMPOSE_FILES=(-f docker-compose.yml)
+if [[ -f docker-compose.shared.yml ]] \
+    && docker network inspect paperless_ml_net >/dev/null 2>&1; then
+    COMPOSE_FILES+=(-f docker-compose.shared.yml)
+    info "Detected paperless_ml_net — verifying in shared-overlay mode"
+fi
+
 info "Bringing up full stack"
-docker compose up -d >/dev/null
+docker compose "${COMPOSE_FILES[@]}" up -d >/dev/null
 
 START_TS="$(date +%s)"
 
