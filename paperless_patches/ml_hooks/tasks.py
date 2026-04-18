@@ -44,9 +44,10 @@ def encode_document(self, document_id: int) -> None:
     if doc is None or not doc.content:
         return
 
-    # Real Qdrant upsert lands in Job 3 (needs the `/encode` endpoint on
-    # FastAPI and the Qdrant service in compose). Skip cleanly for now.
+    payload = {"document_id": str(doc.pk), "text": doc.content}
+    result = ml_client.post("/encode", payload)
     log.info(
-        "encode_document: doc %s skipped (awaiting Qdrant wiring, Job 3)",
+        "encode_document: doc %s indexed %s chunks in Qdrant",
         doc.pk,
+        result.get("chunks_indexed", "?"),
     )

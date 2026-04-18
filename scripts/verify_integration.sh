@@ -163,7 +163,7 @@ ok_htr=0; ok_embed=0
 if wait_for_log webserver "htr_transcribe: doc" 120; then ok_htr=1; fi
 if wait_for_log webserver "encode_document: doc" 120; then ok_embed=1; fi
 if (( ok_htr && ok_embed )); then
-    pass "Both Celery tasks hit the FastAPI stub and updated the document"
+    pass "Both Celery tasks ran end-to-end"
 else
     (( ok_htr ))   || fail "htr_transcribe never completed"
     (( ok_embed )) || fail "encode_document never completed"
@@ -171,9 +171,32 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 7: vectors landed in Qdrant ----------
+info "Checkpoint 7: document vectors upserted to Qdrant"
+attempt=0
+count=0
+while (( attempt < 30 )); do
+    count="$(curl -s -X POST http://localhost:6333/collections/document_chunks/points/count \
+        -H 'Content-Type: application/json' \
+        -d '{"exact":true}' 2>/dev/null \
+        | python3 -c 'import sys,json;print(json.load(sys.stdin).get("result",{}).get("count",0))' 2>/dev/null || echo 0)"
+    if [[ "$count" -gt 0 ]]; then
+        break
+    fi
+    sleep 2
+    attempt=$(( attempt + 1 ))
+done
+if [[ "$count" -gt 0 ]]; then
+    pass "Qdrant document_chunks contains $count vector(s)"
+else
+    fail "No vectors in Qdrant after encode_document — upsert path may be broken"
+    docker compose logs --tail=60 fastapi || true
+    exit 1
+fi
+
 # ---------- done ----------
 echo
-pass "All 6 checkpoints passed."
+pass "All 7 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
 echo "  Feedback API:  http://localhost:8000/api/ml/feedback/"

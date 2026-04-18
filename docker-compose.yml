@@ -68,7 +68,7 @@ services:
     ports:
       - "8090:8000"          # host 8090 -> container 8000 (curl from laptop; 8080 taken by Bilibili proxy on Windows)
     environment:
-      USE_MOCK_CHUNKS: "true"    # flip to "false" in Job 3 once encode_document upserts real vectors
+      USE_MOCK_CHUNKS: "false"   # real Qdrant search; vectors populated by ml_hooks.encode_document
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
       HTR_MODEL_VERSION: htr_v1

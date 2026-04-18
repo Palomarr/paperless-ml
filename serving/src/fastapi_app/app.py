@@ -3,6 +3,7 @@ import io
 import math
 import os
 import time
+import uuid
 
 import numpy as np
 import torch
@@ -42,11 +43,36 @@ QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = "document_chunks"
 
 qdrant_client = None
+_qdrant_models = None
 try:
     from qdrant_client import QdrantClient
+    from qdrant_client import models as _qdrant_models
     qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=5)
 except Exception:
     pass
+
+# Stable namespace for chunk point IDs — uuid5(namespace, f"{doc_id}:{idx}")
+# makes upserts idempotent: re-encoding the same document overwrites its chunks.
+_CHUNK_ID_NAMESPACE = uuid.UUID("7b93c9e3-ff1f-4c8f-a3bf-ca3f1bf9a0e0")
+
+
+def _chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+    step = max(size - overlap, 1)
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        chunks.append(text[start:start + size])
+        start += step
+    return chunks
+
+
+def _point_id_for(document_id: str, chunk_idx: int) -> str:
+    return str(uuid.uuid5(_CHUNK_ID_NAMESPACE, f"{document_id}:{chunk_idx}"))
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -72,6 +98,20 @@ class HTRResponse(BaseModel):
     htr_output: str
     htr_confidence: float
     htr_flagged: bool
+    model_version: str
+    inference_time_ms: int
+
+
+class EncodeRequest(BaseModel):
+    document_id: str
+    text: str
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+
+class EncodeResponse(BaseModel):
+    document_id: str
+    chunks_indexed: int
     model_version: str
     inference_time_ms: int
 
@@ -310,4 +350,66 @@ async def predict_search(req: SearchRequest) -> SearchResponse:
         fallback_to_keyword=fallback_to_keyword,
         model_version=RETRIEVAL_MODEL_VERSION,
         inference_time_ms=inference_time_ms,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Encode endpoint — index document chunks into Qdrant
+# ---------------------------------------------------------------------------
+
+
+@app.post("/encode", response_model=EncodeResponse)
+async def encode(req: EncodeRequest) -> EncodeResponse:
+    if qdrant_client is None or _qdrant_models is None:
+        raise HTTPException(status_code=503, detail="Qdrant unavailable")
+
+    t0 = time.perf_counter()
+
+    chunks = _chunk_text(req.text, req.chunk_size, req.chunk_overlap)
+    if not chunks:
+        raise HTTPException(status_code=422, detail="Empty text after stripping")
+
+    embeddings = st_model.encode(chunks, convert_to_numpy=True)
+
+    # Remove any existing chunks for this document so stale entries
+    # (from shorter future re-encodes) don't linger. Ignore errors
+    # — a fresh collection with no matching points just returns 0.
+    try:
+        qdrant_client.delete(
+            collection_name=QDRANT_COLLECTION,
+            points_selector=_qdrant_models.FilterSelector(
+                filter=_qdrant_models.Filter(
+                    must=[
+                        _qdrant_models.FieldCondition(
+                            key="document_id",
+                            match=_qdrant_models.MatchValue(value=req.document_id),
+                        )
+                    ]
+                )
+            ),
+        )
+    except Exception:
+        pass
+
+    points = [
+        _qdrant_models.PointStruct(
+            id=_point_id_for(req.document_id, idx),
+            vector=emb.tolist(),
+            payload={
+                "document_id": req.document_id,
+                "chunk_index": idx,
+                "chunk_text": chunks[idx],
+                "model_version": RETRIEVAL_MODEL_VERSION,
+            },
+        )
+        for idx, emb in enumerate(embeddings)
+    ]
+
+    qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=points)
+
+    return EncodeResponse(
+        document_id=req.document_id,
+        chunks_indexed=len(chunks),
+        model_version=RETRIEVAL_MODEL_VERSION,
+        inference_time_ms=int((time.perf_counter() - t0) * 1000),
     )
