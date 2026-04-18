@@ -23,7 +23,9 @@ import requests
 log = logging.getLogger("paperless.ml_hooks.events")
 
 REDPANDA_PROXY_URL = os.getenv("REDPANDA_PROXY_URL", "http://redpanda:8082")
-_PUBLISH_TIMEOUT_S = 5
+# Pandaproxy creates topics on first produce, which can take 5–10s for
+# metadata propagation. Give enough headroom that cold-start doesn't fail.
+_PUBLISH_TIMEOUT_S = int(os.getenv("REDPANDA_PUBLISH_TIMEOUT_S", "15"))
 _PANDAPROXY_JSON = "application/vnd.kafka.json.v2+json"
 
 
