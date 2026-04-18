@@ -194,9 +194,21 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 8: modified search view returns merged results ----------
+info "Checkpoint 8: /api/search/ returns documents (keyword + semantic merge)"
+search_resp="$(curl -s -u admin:admin "http://localhost:8000/api/search/?query=integration" || echo '{}')"
+docs_count="$(echo "$search_resp" | python3 -c "import sys,json;print(len(json.load(sys.stdin).get('documents',[])))" 2>/dev/null || echo 0)"
+ml_added="$(echo "$search_resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('ml_semantic_added',0))" 2>/dev/null || echo 0)"
+if [[ "$docs_count" -gt 0 ]]; then
+    pass "/api/search/ returned $docs_count document(s); ml_semantic_added=$ml_added"
+else
+    fail "/api/search/?query=integration returned 0 documents (response: $(echo "$search_resp" | head -c 300))"
+    exit 1
+fi
+
 # ---------- done ----------
 echo
-pass "All 7 checkpoints passed."
+pass "All 8 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
 echo "  Feedback API:  http://localhost:8000/api/ml/feedback/"

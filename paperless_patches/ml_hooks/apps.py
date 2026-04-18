@@ -35,14 +35,29 @@ class MlHooksConfig(AppConfig):
         from django.urls import re_path
         from paperless import urls as paperless_urls
 
+        from ml_hooks.views import get_ml_global_search_view
+
         marker = "_ml_hooks_installed"
         if getattr(paperless_urls, marker, False):
             return
 
+        # 1. /api/ml/* — feedback API and other ml_hooks routes
         paperless_urls.urlpatterns.insert(
             0,
             re_path(r"^api/ml/", include("ml_hooks.urls")),
         )
+        # 2. /api/search/ override — replaces Paperless's GlobalSearchView with
+        #    one that merges semantic results from FastAPI. Inserted BEFORE
+        #    the existing ^api/ include so Django matches our pattern first.
+        paperless_urls.urlpatterns.insert(
+            0,
+            re_path(
+                r"^api/search/$",
+                get_ml_global_search_view().as_view(),
+                name="ml_global_search",
+            ),
+        )
+
         setattr(paperless_urls, marker, True)
         clear_url_caches()
-        log.info("ml_hooks: mounted /api/ml/ routes")
+        log.info("ml_hooks: mounted /api/ml/ routes and /api/search/ override")
