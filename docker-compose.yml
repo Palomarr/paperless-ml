@@ -125,6 +125,9 @@ services:
       - --advertise-rpc-addr=redpanda:33145
       - --pandaproxy-addr=0.0.0.0:8082
       - --advertise-pandaproxy-addr=redpanda:8082
+      # Match Kafka's default so Pandaproxy produces to new topics don't stall.
+      - --set
+      - redpanda.auto_create_topics_enabled=true
     ports:
       - "9092:9092"          # Kafka protocol
       - "8082:8082"          # Pandaproxy REST (HTTP produce/consume)
@@ -137,6 +140,25 @@ services:
       timeout: 5s
       retries: 15
       start_period: 20s
+
+  # One-shot: create the four known topics. Safe to re-run — rpk topic create
+  # returns non-zero on existing topics but we swallow errors, and auto-create
+  # is also enabled above so missed topics self-heal on first produce.
+  redpanda-init:
+    image: redpandadata/redpanda:v24.2.4
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set +e
+        for t in paperless.uploads paperless.corrections paperless.queries paperless.feedback; do
+          rpk topic create --brokers redpanda:9092 "$$t" --partitions 1 --replicas 1 2>&1 \
+            | grep -v "already exists" || true
+        done
+        echo "redpanda-init: topics ready"
+    restart: "no"
 
   # Vector store for semantic search. Collection created by qdrant-init.
   qdrant:
