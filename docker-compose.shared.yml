@@ -9,6 +9,12 @@
 #   ./scripts/create_network.sh
 #   docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d
 #
+# Services attached to the shared net are the ones external consumers need.
+# postgres (Paperless's own DB) and qdrant stay internal to avoid DNS
+# ambiguity with the data role's identically-named postgres/qdrant in
+# REDES01/paperless_data, which runs as an independent project for their
+# own tables and rubric deliverables.
+#
 # DNS aliases keep the data role's hardcoded hostnames working:
 #   - paperless-web  → also answers to paperless-webserver-1, webserver
 #   - ml-gateway     → also answers to fastapi_server
@@ -29,22 +35,12 @@ services:
         aliases:
           - fastapi_server
 
-  postgres:
-    networks:
-      default:
-      paperless_ml_net:
-
   minio:
     networks:
       default:
       paperless_ml_net:
 
   redpanda:
-    networks:
-      default:
-      paperless_ml_net:
-
-  qdrant:
     networks:
       default:
       paperless_ml_net:
