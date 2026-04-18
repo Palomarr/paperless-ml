@@ -18,6 +18,42 @@ services:
       timeout: 3s
       retries: 20
 
+  # Vector store for semantic search. Collection created by qdrant-init.
+  qdrant:
+    image: qdrant/qdrant:v1.11.3
+    restart: unless-stopped
+    ports:
+      - "6333:6333"          # REST API (dashboard at http://localhost:6333/dashboard)
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: create the `document_chunks` collection idempotently.
+  # Runs to completion, then exits. Safe to re-run.
+  qdrant-init:
+    image: curlimages/curl:8.9.1
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if curl -sf http://qdrant:6333/collections/document_chunks > /dev/null; then
+          echo "qdrant-init: collection document_chunks already exists";
+        else
+          echo "qdrant-init: creating document_chunks (768-dim, cosine)";
+          curl -sf -X PUT http://qdrant:6333/collections/document_chunks \
+            -H 'Content-Type: application/json' \
+            -d '{"vectors":{"size":768,"distance":"Cosine"}}';
+          echo "qdrant-init: created";
+        fi
+    restart: "no"
+
   # Real ML serving container. Built from serving/ — CPU-only for WSL/laptop
   # dev; the GPU variant (Dockerfile.fastapi) is used on Chameleon.
   # First build takes ~5–10 min (model download + pytorch-cpu install).
@@ -26,10 +62,13 @@ services:
       context: ./serving
       dockerfile: dockerfiles/Dockerfile.fastapi-cpu
     restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
     ports:
       - "8090:8000"          # host 8090 -> container 8000 (curl from laptop; 8080 taken by Bilibili proxy on Windows)
     environment:
-      USE_MOCK_CHUNKS: "true"    # Qdrant arrives in Job 2; mock chunks for search until then
+      USE_MOCK_CHUNKS: "true"    # flip to "false" in Job 3 once encode_document upserts real vectors
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
       HTR_MODEL_VERSION: htr_v1
@@ -98,6 +137,7 @@ services:
 
 volumes:
   pg_data:
+  qdrant_data:
   paperless_data:
   paperless_media:
   paperless_consume:
