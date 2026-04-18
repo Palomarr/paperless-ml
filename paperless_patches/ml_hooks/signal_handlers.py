@@ -2,7 +2,7 @@ import logging
 
 from ml_hooks import tasks
 
-log = logging.getLogger("ml_hooks")
+log = logging.getLogger("paperless.ml_hooks")
 
 
 def on_consumption_finished(sender, document, **kwargs):

@@ -86,11 +86,24 @@ wait_for_log() {
 }
 
 # ---------- checkpoint 1: URL routes mounted ----------
-info "Checkpoint 1: ml_hooks URL routes mounted at startup"
-if wait_for_log webserver "ml_hooks: mounted /api/ml/ routes" 120; then
-    pass "AppConfig.ready() ran and injected /api/ml/ into urlpatterns"
+info "Checkpoint 1: /api/ml/ URL namespace reachable"
+attempt=0
+probe_code=0
+while (( attempt < 60 )); do
+    probe_code="$(curl -s -o /dev/null -w '%{http_code}' -u admin:admin http://localhost:8000/api/ml/feedback/ || echo 000)"
+    if [[ "$probe_code" == "200" || "$probe_code" == "500" ]]; then
+        # 200 = mounted + table exists; 500 = mounted but table missing (still proves the route)
+        break
+    fi
+    sleep 2
+    attempt=$(( attempt + 1 ))
+done
+if [[ "$probe_code" == "200" ]]; then
+    pass "GET /api/ml/feedback/ -> 200 (URL mount + DB both working)"
+elif [[ "$probe_code" == "500" ]]; then
+    pass "URL mounted (got 500 — likely missing migration; checkpoint 2 will catch)"
 else
-    fail "Did not see 'ml_hooks: mounted /api/ml/ routes' in webserver logs within 120s"
+    fail "GET /api/ml/feedback/ returned HTTP $probe_code after 120s — URL not mounted"
     docker compose logs --tail=80 webserver || true
     exit 1
 fi

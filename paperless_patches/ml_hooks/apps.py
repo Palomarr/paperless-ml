@@ -2,7 +2,7 @@ import logging
 
 from django.apps import AppConfig
 
-log = logging.getLogger("ml_hooks")
+log = logging.getLogger("paperless.ml_hooks")
 
 
 class MlHooksConfig(AppConfig):

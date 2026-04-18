@@ -5,7 +5,7 @@ from documents.models import Document
 
 from ml_hooks import ml_client
 
-log = logging.getLogger("ml_hooks.tasks")
+log = logging.getLogger("paperless.ml_hooks.tasks")
 
 HTR_CONFIDENCE_FLAG_THRESHOLD = 0.75
 
