@@ -123,8 +123,11 @@ services:
       - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
       - --rpc-addr=0.0.0.0:33145
       - --advertise-rpc-addr=redpanda:33145
+      - --pandaproxy-addr=0.0.0.0:8082
+      - --advertise-pandaproxy-addr=redpanda:8082
     ports:
       - "9092:9092"          # Kafka protocol
+      - "8082:8082"          # Pandaproxy REST (HTTP produce/consume)
       - "9644:9644"          # Admin API + /metrics endpoint
     volumes:
       - redpanda_data:/var/lib/redpanda/data
@@ -245,6 +248,7 @@ services:
       PAPERLESS_URL: "http://localhost:8000"
       ML_GATEWAY_URL: "http://ml-gateway:8000"
       ML_GATEWAY_TIMEOUT: "30"
+      REDPANDA_PROXY_URL: "http://redpanda:8082"
     volumes:
       - ./paperless_patches:/usr/src/paperless/patches
       - paperless_data:/usr/src/paperless/data

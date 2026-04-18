@@ -157,16 +157,16 @@ else
     exit 1
 fi
 
-# ---------- checkpoint 6: celery tasks ran ----------
-info "Checkpoint 6: HTR + embed tasks completed"
-ok_htr=0; ok_embed=0
-if wait_for_log paperless-web "htr_transcribe: doc" 120; then ok_htr=1; fi
+# ---------- checkpoint 6: upload event published + encode task ran ----------
+info "Checkpoint 6: paperless.uploads event published + encode_document ran"
+ok_upload=0; ok_embed=0
+if wait_for_log paperless-web "published event to paperless.uploads" 120; then ok_upload=1; fi
 if wait_for_log paperless-web "encode_document: doc" 120; then ok_embed=1; fi
-if (( ok_htr && ok_embed )); then
-    pass "Both Celery tasks ran end-to-end"
+if (( ok_upload && ok_embed )); then
+    pass "Redpanda publish + Qdrant encode both ran"
 else
-    (( ok_htr ))   || fail "htr_transcribe never completed"
-    (( ok_embed )) || fail "encode_document never completed"
+    (( ok_upload )) || fail "paperless.uploads event was not published"
+    (( ok_embed ))  || fail "encode_document never completed"
     docker compose logs --tail=150 paperless-web | tail -80 || true
     exit 1
 fi
@@ -235,9 +235,29 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 10: paperless.uploads topic exists in Redpanda ----------
+info "Checkpoint 10: paperless.uploads topic created by publisher"
+attempt=0
+topic_present=0
+while (( attempt < 20 )); do
+    if docker compose exec -T redpanda rpk topic list 2>/dev/null | awk '{print $1}' | grep -qx "paperless.uploads"; then
+        topic_present=1
+        break
+    fi
+    sleep 2
+    attempt=$(( attempt + 1 ))
+done
+if (( topic_present )); then
+    pass "redpanda topic paperless.uploads exists (producer fired at least once)"
+else
+    fail "paperless.uploads topic not found — publisher never succeeded"
+    docker compose exec -T redpanda rpk topic list 2>/dev/null || true
+    exit 1
+fi
+
 # ---------- done ----------
 echo
-pass "All 9 checkpoints passed."
+pass "All 10 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
 echo "  Feedback API:  http://localhost:8000/api/ml/feedback/"
