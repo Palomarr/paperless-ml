@@ -1,0 +1,27 @@
+# Reference fragment — merge into the full compose under services: paperless-web / paperless-worker.
+# This shows ONLY the additions needed to load ml_hooks into the stock image.
+
+services:
+  paperless-web:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+    environment:
+      PAPERLESS_APPS: "ml_hooks"
+      PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
+      ML_FASTAPI_BASE_URL: "http://fastapi:8080"
+      ML_FASTAPI_TIMEOUT: "30"
+    volumes:
+      - ./paperless_patches:/usr/src/paperless/patches:ro
+    # No PAPERLESS_POST_CONSUME_SCRIPT — we use the signal instead.
+
+  paperless-worker:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+    environment:
+      PAPERLESS_APPS: "ml_hooks"
+      PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
+      ML_FASTAPI_BASE_URL: "http://fastapi:8080"
+      ML_FASTAPI_TIMEOUT: "30"
+    volumes:
+      - ./paperless_patches:/usr/src/paperless/patches:ro
+    command: >
+      bash -c "python manage.py migrate ml_hooks --noinput &&
+               celery -A paperless worker -l INFO"

@@ -1,0 +1,77 @@
+services:
+  broker:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: paperless
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  fastapi-stub:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./scripts/fastapi_stub.py:/app/fastapi_stub.py:ro
+    command: >
+      sh -c "pip install --quiet fastapi 'uvicorn[standard]' &&
+             uvicorn fastapi_stub:app --host 0.0.0.0 --port 8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz',timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      broker:
+        condition: service_started
+      fastapi-stub:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      PAPERLESS_APPS: "ml_hooks"
+      PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
+      PAPERLESS_REDIS: "redis://broker:6379"
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBHOST: db
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: paperless
+      PAPERLESS_SECRET_KEY: "dev-only-insecure-key-do-not-ship"
+      PAPERLESS_TIME_ZONE: America/New_York
+      PAPERLESS_OCR_LANGUAGE: eng
+      PAPERLESS_ADMIN_USER: admin
+      PAPERLESS_ADMIN_PASSWORD: admin
+      PAPERLESS_URL: "http://localhost:8000"
+      ML_FASTAPI_BASE_URL: "http://fastapi-stub:8080"
+      ML_FASTAPI_TIMEOUT: "10"
+    volumes:
+      - ./paperless_patches:/usr/src/paperless/patches
+      - paperless_data:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - paperless_consume:/usr/src/paperless/consume
+      - paperless_export:/usr/src/paperless/export
+
+volumes:
+  pg_data:
+  paperless_data:
+  paperless_media:
+  paperless_consume:
+  paperless_export:
