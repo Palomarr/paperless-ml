@@ -215,6 +215,12 @@ services:
       QDRANT_PORT: "6333"
       HTR_MODEL_VERSION: htr_v1
       RETRIEVAL_MODEL_VERSION: retrieval_v1
+      # /htr fetches region crops from MinIO via crop_s3_url (Elnath's pipeline).
+      # Must match our MinIO defaults; the image ships with admin/paperless_minio
+      # defaults that predate our rename.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
