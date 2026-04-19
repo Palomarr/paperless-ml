@@ -109,20 +109,41 @@ fi
 # ---------- step 2: stage artifacts from MLflow ----------
 log "Step 2/4: staging artifacts from MLflow to local /tmp/model-v${VERSION}"
 docker compose exec -T mlflow python - <<PYEOF
-import os
+import os, shutil, sys
+import mlflow.artifacts
 from mlflow import MlflowClient
 client = MlflowClient(tracking_uri="http://localhost:5000")
 vinfo = client.get_model_version("${MODEL_NAME}", "${VERSION}")
+
+# Clean + re-stage so repeated runs don't mix older files in.
 dst = f"/tmp/model-v${VERSION}"
+if os.path.isdir(dst):
+    shutil.rmtree(dst)
 os.makedirs(dst, exist_ok=True)
-local_path = client.download_artifacts(vinfo.run_id, "", dst)
+
+# vinfo.source can be 'runs:/<run_id>/<path>' (MLflow 2.x) OR
+# 'models:/m-<UUID>' (MLflow 3.x first-class logged models). download_artifacts
+# resolves both schemes; using client.download_artifacts(run_id, "", ...)
+# only walks the run's artifact path which is empty in the 3.x scheme.
+local_path = mlflow.artifacts.download_artifacts(
+    artifact_uri=vinfo.source,
+    dst_path=dst,
+)
 print(f"staged run_id={vinfo.run_id} source={vinfo.source} -> {local_path}")
+
+staged_count = 0
 for root, _, files in os.walk(dst):
     for f in files:
         full = os.path.join(root, f)
         rel = os.path.relpath(full, dst)
         size = os.path.getsize(full)
         print(f"  {rel} ({size} bytes)")
+        staged_count += 1
+
+if staged_count == 0:
+    sys.stderr.write(f"ERROR: 0 files staged from {vinfo.source}\n")
+    sys.exit(1)
+print(f"staged {staged_count} files")
 PYEOF
 ok "artifacts staged"
 
@@ -133,7 +154,7 @@ log "Step 3/4: copying to s3://${WAREHOUSE_BUCKET}/warehouse/models/v${VERSION}/
 # by our compose command). Avoids cross-container plumbing — minio/mc is a
 # scratch image without tar, and adding tar to it would mean a custom image.
 docker compose exec -T mlflow python - <<PYEOF
-import boto3, os
+import boto3, os, sys
 s3 = boto3.client(
     "s3",
     endpoint_url="http://minio:9000",
@@ -151,6 +172,9 @@ for root, _, files in os.walk(src):
         s3.upload_file(fp, bucket, key)
         print(f"  uploaded {key}")
         uploaded += 1
+if uploaded == 0:
+    sys.stderr.write(f"ERROR: 0 objects uploaded from {src} — staging dir empty\n")
+    sys.exit(1)
 print(f"total: {uploaded} objects under s3://{bucket}/{prefix}")
 PYEOF
 ok "uploaded to s3://${WAREHOUSE_BUCKET}/warehouse/models/v${VERSION}/"
