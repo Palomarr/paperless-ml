@@ -151,8 +151,33 @@ for q in "Acme Corporation supplies" "server room expansion"; do
     ok "  query=\"$q\" → $hit_count document(s)"
 done
 
-# ---------- Step 4: submit feedback (corrections + ratings) ----------
-log "Submitting 2 HTR corrections + 2 search ratings via /api/ml/feedback/"
+# ---------- Step 4: fire synthetic /htr calls to populate htr_requests_total ----------
+# Our own /htr endpoint isn't called in standalone mode (Elnath's consumer is
+# the usual caller). Without it, the HTR-correction-rate Grafana panel's
+# denominator is zero and the ratio is NaN. Fire a few direct TrOCR calls
+# with a 1×1 PNG base64 so the counter is non-zero. The resulting HTR output
+# is garbage but that's fine — we're seeding metrics, not training data.
+log "Firing 5 synthetic /htr calls (1×1 PNG) to populate htr_requests_total"
+TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+for i in 1 2 3 4 5; do
+    # Retry up to 3 times: TrOCR can be slow to warm up on first call (~5s).
+    if curl -fsS -m 30 -X POST \
+        -H 'Content-Type: application/json' \
+        -d "{\"region_id\": \"seed-$i\", \"image_base64\": \"${TINY_PNG_B64}\"}" \
+        "http://${HOST}:8090/htr" >/dev/null 2>&1; then
+        printf "."
+    else
+        printf "x"
+    fi
+done
+echo
+ok "synthetic /htr calls done"
+
+# ---------- Step 5: submit feedback (corrections + click + rating) ----------
+# IMPORTANT: search_click (not search_rating) is what fires
+# search_clicks_total counter on ml-gateway. Ratings are persisted to
+# Feedback but do not bump the CTR numerator.
+log "Submitting 2 HTR corrections + 1 search_click + 1 search_rating via /api/ml/feedback/"
 LATEST_IDS="$(curl -fsS -u "$AUTH" "${BASE}/api/documents/?ordering=-id&page_size=3" \
     | python3 -c 'import sys,json;print(" ".join(str(r["id"]) for r in json.load(sys.stdin)["results"]))')"
 read -r -a DOC_IDS <<< "$LATEST_IDS"
@@ -169,15 +194,31 @@ for i in 0 1; do
     ok "  correction on doc ${DOC_IDS[$i]}"
 done
 
-for i in 0 2; do
-    rating=$((i == 0 ? 1 : 0))
-    curl -fsS -u "$AUTH" -X POST \
-        -H 'Content-Type: application/json' \
-        -d "{\"document\": ${DOC_IDS[$i]}, \"kind\": \"search_rating\", \"rating\": $rating, \"query_text\": \"Acme Corporation supplies\"}" \
-        "${BASE}/api/ml/feedback/" >/dev/null
-    rating_label=$((rating == 1 ? 0 : 0)); [[ $rating -eq 1 ]] && rating_label="👍" || rating_label="👎"
-    ok "  rating=$rating_label on doc ${DOC_IDS[$i]}"
-done
+# One search_click — this is what populates search_clicks_total
+curl -fsS -u "$AUTH" -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"document\": ${DOC_IDS[0]}, \"kind\": \"search_click\", \"query_text\": \"Acme Corporation supplies\"}" \
+    "${BASE}/api/ml/feedback/" >/dev/null
+ok "  click on doc ${DOC_IDS[0]} (populates search_clicks_total)"
+
+# One search_rating — persisted but doesn't fire any metric hook
+curl -fsS -u "$AUTH" -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"document\": ${DOC_IDS[2]}, \"kind\": \"search_rating\", \"rating\": 0, \"query_text\": \"server room expansion\"}" \
+    "${BASE}/api/ml/feedback/" >/dev/null
+ok "  👎 rating on doc ${DOC_IDS[2]}"
+
+# ---------- Step 6: diagnostic — show counter values ----------
+log "Counter snapshot (what Grafana will plot)"
+METRICS="$(curl -fsS "http://${HOST}:8090/metrics" 2>/dev/null \
+    | grep -E '^(htr_requests_total|htr_corrections_total|search_queries_total|search_clicks_total)\s' \
+    || true)"
+if [[ -z "$METRICS" ]]; then
+    warn "  Counters not visible in /metrics. Is ml-gateway running the latest code?"
+    warn "  Fix: docker compose build ml-gateway && docker compose up -d --force-recreate ml-gateway"
+else
+    echo "$METRICS" | sed 's/^/    /'
+fi
 
 # ---------- Step 5 (optional): fire + resolve an alert ----------
 if (( TRIGGER_ALERT )); then
@@ -207,8 +248,26 @@ sys.exit(1)
 
     if (( fired )); then
         ok "QdrantDown is firing in Prometheus"
-        log "rollback-ctrl webhook log (last 10 lines):"
-        sg docker -c "docker compose logs --tail=10 rollback-ctrl" || true
+        # Prometheus sends the alert to Alertmanager on each evaluation cycle
+        # (~15s). Alertmanager then waits group_wait: 10s before dispatching
+        # the webhook. So the rollback-ctrl POST arrives ~15-30s AFTER
+        # Prometheus shows firing. Wait for it explicitly rather than
+        # tailing logs that haven't been written yet.
+        log "Waiting up to 45s for Alertmanager → rollback-ctrl webhook"
+        WEBHOOK_DEADLINE=$((SECONDS + 45))
+        while (( SECONDS < WEBHOOK_DEADLINE )); do
+            if sg docker -c "docker compose logs rollback-ctrl 2>/dev/null" \
+                | grep -q "rollback-trigger"; then
+                ok "rollback-ctrl received the webhook"
+                break
+            fi
+            sleep 3
+        done
+        log "rollback-ctrl webhook log (rollback-trigger lines):"
+        sg docker -c "docker compose logs rollback-ctrl 2>/dev/null" \
+            | grep rollback-trigger | tail -5 \
+            | sed 's/^/    /' \
+            || warn "    (no rollback-trigger line found — Alertmanager may not have dispatched yet)"
     else
         warn "QdrantDown did not reach firing state in 120s"
     fi
