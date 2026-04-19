@@ -1,0 +1,99 @@
+# Alert rules for paperless-ml.
+# Thresholds per architecture.html:976-977 (rollback triggers):
+#   HTR: rolling 1h avg confidence < 0.6 OR correction rate > 0.3
+#   Search: rolling 2h CTR < 0.15
+# Also includes availability + latency alerts for demo narration.
+
+groups:
+  - name: paperless-ml
+    interval: 30s
+    rules:
+
+      # ── Availability ────────────────────────────────────────────────
+      - alert: MLGatewayDown
+        expr: up{job="ml-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          role: serving
+        annotations:
+          summary: "ml-gateway is down"
+          description: "Prometheus cannot scrape ml-gateway /metrics for >1m. All HTR and search inference is unavailable."
+
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          role: serving
+        annotations:
+          summary: "Qdrant is down"
+          description: "Vector store unavailable for >1m. Semantic search will fall back to keyword-only."
+
+      - alert: RedpandaDown
+        expr: up{job="redpanda"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          role: data
+        annotations:
+          summary: "Redpanda is down"
+          description: "Event bus unavailable for >1m. Upload/correction/query/feedback events are not being persisted."
+
+      # ── Latency ─────────────────────────────────────────────────────
+      # prometheus_fastapi_instrumentator emits `http_request_duration_seconds`.
+      - alert: MLGatewayHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="ml-gateway"}[5m]))
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          role: serving
+        annotations:
+          summary: "ml-gateway p95 latency > 5s"
+          description: "p95 of HTTP request duration exceeded 5s for 5m. Users are likely seeing slow HTR/search responses."
+
+      # ── Quality / rollback triggers (architecture.html:976) ─────────
+      - alert: HTRConfidenceLow
+        expr: |
+          rate(htr_confidence_sum[1h])
+          /
+          rate(htr_confidence_count[1h])
+          < 0.6
+        for: 10m
+        labels:
+          severity: critical
+          role: serving
+          rollback_trigger: "true"
+        annotations:
+          summary: "HTR rolling 1h avg confidence < 0.6"
+          description: "See architecture.html:976 — baseline ~0.82; below 0.6 triggers model rollback."
+
+      - alert: HTRCorrectionRateHigh
+        expr: |
+          rate(htr_corrections_total[1h]) / rate(htr_requests_total[1h]) > 0.3
+          and rate(htr_requests_total[1h]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          role: serving
+          rollback_trigger: "true"
+        annotations:
+          summary: "HTR correction rate > 30%"
+          description: "See architecture.html:976 — baseline ~12%; above 30% exceeds a 30-staff department's tolerable annotation burden."
+
+      - alert: SearchCTRLow
+        expr: |
+          rate(search_clicks_total[2h]) / rate(search_queries_total[2h]) < 0.15
+          and rate(search_queries_total[2h]) > 0
+        for: 30m
+        labels:
+          severity: warning
+          role: serving
+          rollback_trigger: "true"
+        annotations:
+          summary: "Search CTR < 15% on semantic results"
+          description: "See architecture.html:977 — baseline ~35%; below 15% for 2h means users are better served by keyword-only."

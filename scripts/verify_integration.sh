@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the paperless-ngx + ml_hooks overlay integration end-to-end.
-# Runs 9 checkpoints against a locally-brought-up docker compose stack.
+# Runs 12 checkpoints against a locally-brought-up docker compose stack.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -294,13 +294,62 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 12: alerting pipeline wired ----------
+info "Checkpoint 12: Prometheus rule group loaded + Alertmanager reachable"
+# Three sub-checks: alerts.yml rule group is loaded, Prometheus knows about
+# Alertmanager, and Alertmanager responds healthy.
+ok_rules=0; ok_am_target=0; ok_am_health=0
+
+rules_out="$(curl -s http://localhost:9090/api/v1/rules 2>/dev/null || echo '')"
+if echo "$rules_out" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+groups = d.get("data", {}).get("groups", [])
+print("1" if any(g.get("name") == "paperless-ml" for g in groups) else "0")
+' 2>/dev/null | grep -qx 1; then
+    ok_rules=1
+fi
+
+am_targets="$(curl -s http://localhost:9090/api/v1/alertmanagers 2>/dev/null || echo '')"
+if echo "$am_targets" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+ams = d.get("data", {}).get("activeAlertmanagers", [])
+print("1" if ams else "0")
+' 2>/dev/null | grep -qx 1; then
+    ok_am_target=1
+fi
+
+am_health="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:9093/-/healthy 2>/dev/null || echo 000)"
+if [[ "$am_health" == "200" ]]; then
+    ok_am_health=1
+fi
+
+if (( ok_rules && ok_am_target && ok_am_health )); then
+    pass "Rule group 'paperless-ml' loaded; Prometheus↔Alertmanager linked; Alertmanager healthy"
+else
+    (( ok_rules )) || fail "Prometheus did not load the 'paperless-ml' rule group (alerts.yml)"
+    (( ok_am_target )) || fail "Prometheus has no active Alertmanager targets"
+    (( ok_am_health )) || fail "Alertmanager /-/healthy not 200 (got: $am_health)"
+    curl -s http://localhost:9090/api/v1/rules 2>/dev/null | head -c 500 || true
+    exit 1
+fi
+
 # ---------- done ----------
 echo
-pass "All 11 checkpoints passed."
+pass "All 12 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
 echo "  Feedback API:  http://localhost:8000/api/ml/feedback/"
+echo "  Prometheus:    http://localhost:9090/alerts"
+echo "  Alertmanager:  http://localhost:9093"
 echo "  Tear down:     docker compose down -v"
+echo
+echo "Smoke-test an alert firing:"
+echo "  docker compose stop qdrant                 # wait ~90s"
+echo "  curl -s http://localhost:9090/api/v1/alerts | python3 -m json.tool"
+echo "  docker compose logs rollback-ctrl          # confirm webhook arrived"
+echo "  docker compose start qdrant                # alert resolves"
 
 if (( ! KEEP_UP )); then
     info "Leaving stack up (use --keep-up flag to suppress this notice)"

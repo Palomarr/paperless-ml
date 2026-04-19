@@ -6,6 +6,16 @@ global:
   scrape_timeout: 10s
   evaluation_interval: 15s
 
+# Alerting rules loaded from sidecar file; Alertmanager dispatches to the
+# rollback controller webhook (see ops/alertmanager/alertmanager.yml).
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

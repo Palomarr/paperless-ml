@@ -24,13 +24,16 @@ class FeedbackViewSet(
     def perform_create(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
         feedback = serializer.save(user=user)
-        # Emit the appropriate Redpanda event for this feedback kind.
+        # Emit the appropriate Redpanda event for this feedback kind, and
+        # fire-and-forget a metric hook to ml-gateway so the rollback-trigger
+        # alerts (correction rate, CTR) have their numerator data.
         if feedback.kind == Feedback.Kind.HTR_CORRECTION:
             events.publish_correction_event(feedback)
-        elif feedback.kind in (
-            Feedback.Kind.SEARCH_CLICK,
-            Feedback.Kind.SEARCH_RATING,
-        ):
+            ml_client.post_fire_and_forget("/metrics/correction-recorded")
+        elif feedback.kind == Feedback.Kind.SEARCH_CLICK:
+            events.publish_feedback_event(feedback)
+            ml_client.post_fire_and_forget("/metrics/click-recorded")
+        elif feedback.kind == Feedback.Kind.SEARCH_RATING:
             events.publish_feedback_event(feedback)
 
 

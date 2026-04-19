@@ -35,3 +35,17 @@ def post(path: str, payload: dict) -> dict:
     resp = _session.post(url, json=payload, timeout=TIMEOUT_SECONDS)
     resp.raise_for_status()
     return resp.json()
+
+
+def post_fire_and_forget(path: str, payload: dict | None = None) -> None:
+    """Best-effort POST for metric hooks. Never raises.
+
+    Used by ml_hooks to bump counters on ml-gateway when a user submits a
+    correction or clicks a search result. Metric recording must never block
+    or fail a user-facing request, so exceptions are swallowed.
+    """
+    url = f"{GATEWAY_URL.rstrip('/')}/{path.lstrip('/')}"
+    try:
+        _session.post(url, json=payload or {}, timeout=2)
+    except Exception:
+        pass

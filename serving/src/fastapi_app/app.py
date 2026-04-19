@@ -179,9 +179,11 @@ app = FastAPI(title="Paperless-ngx ML Serving")
 
 
 # Prometheus metrics — exposes /metrics with default HTTP histograms,
-# plus custom collectors for HTR confidence and search similarity.
+# plus custom collectors for HTR confidence/corrections and search
+# similarity/CTR. The four Counter pairs feed the rollback-trigger alerts
+# defined in ops/prometheus/alerts.yml (see architecture.html:884, 976-977).
 try:
-    from prometheus_client import Histogram
+    from prometheus_client import Counter, Histogram
     from prometheus_fastapi_instrumentator import Instrumentator
 
     HTR_CONFIDENCE_HIST = Histogram(
@@ -194,10 +196,30 @@ try:
         "Top-1 cosine similarity score per /search/query call",
         buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
     )
+    HTR_REQUESTS = Counter(
+        "htr_requests_total",
+        "Total /htr calls (denominator for correction-rate alert)",
+    )
+    HTR_CORRECTIONS = Counter(
+        "htr_corrections_total",
+        "HTR corrections recorded via ml_hooks feedback API",
+    )
+    SEARCH_QUERIES = Counter(
+        "search_queries_total",
+        "Total /search/query calls (denominator for CTR alert)",
+    )
+    SEARCH_CLICKS = Counter(
+        "search_clicks_total",
+        "Click events on search results reported via ml_hooks feedback API",
+    )
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 except Exception:
     HTR_CONFIDENCE_HIST = None
     SEARCH_SIMILARITY_HIST = None
+    HTR_REQUESTS = None
+    HTR_CORRECTIONS = None
+    SEARCH_QUERIES = None
+    SEARCH_CLICKS = None
 
 
 @app.get("/health")
@@ -212,6 +234,9 @@ async def health():
 
 @app.post("/htr", response_model=HTRResponse)
 async def predict_htr(req: HTRRequest) -> HTRResponse:
+
+    if HTR_REQUESTS is not None:
+        HTR_REQUESTS.inc()
 
     # Try image_base64 fallback first, then S3 download
     image: Image.Image | None = None
@@ -336,6 +361,9 @@ def _search_qdrant(query_embedding: np.ndarray, top_k: int) -> list[dict]:
 
 @app.post("/search/query", response_model=SearchResponse)
 async def predict_search(req: SearchRequest) -> SearchResponse:
+    if SEARCH_QUERIES is not None:
+        SEARCH_QUERIES.inc()
+
     t0 = time.perf_counter()
 
     # Encode query
@@ -442,3 +470,24 @@ async def encode(req: EncodeRequest) -> EncodeResponse:
         model_version=RETRIEVAL_MODEL_VERSION,
         inference_time_ms=int((time.perf_counter() - t0) * 1000),
     )
+
+
+# ---------------------------------------------------------------------------
+# Internal metric-hook endpoints (feed the rollback-trigger alerts).
+# ml_hooks POSTs here fire-and-forget when a user submits a correction or
+# clicks a search result. Not exposed outside the compose network.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/metrics/correction-recorded")
+async def correction_recorded():
+    if HTR_CORRECTIONS is not None:
+        HTR_CORRECTIONS.inc()
+    return {"status": "ok"}
+
+
+@app.post("/metrics/click-recorded")
+async def click_recorded():
+    if SEARCH_CLICKS is not None:
+        SEARCH_CLICKS.inc()
+    return {"status": "ok"}

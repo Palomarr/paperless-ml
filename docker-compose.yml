@@ -27,6 +27,7 @@ services:
       - "9090:9090"
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -35,6 +36,44 @@ services:
       - --web.enable-lifecycle
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Alertmanager: receives firing alerts from Prometheus and forwards to
+  # the rollback controller webhook. Architecture reference:
+  # architecture.html:968-970.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Rollback controller: stub today (logs webhook payloads). Will swap the
+  # Triton model repo symlink + signal reload once Triton is the serving
+  # backend (see N9 in docs/HANDOFF.md).
+  rollback-ctrl:
+    build:
+      context: ./ops/rollback-ctrl
+    restart: unless-stopped
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -290,6 +329,7 @@ volumes:
   minio_data:
   redpanda_data:
   prometheus_data:
+  alertmanager_data:
   grafana_data:
   paperless_data:
   paperless_media:

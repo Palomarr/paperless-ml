@@ -1,0 +1,20 @@
+# Alertmanager config for paperless-ml.
+# Single webhook receiver pointing at our rollback-ctrl stub.
+# The stub logs payloads today; it will swap Triton model versions
+# once Triton is deployed (see N9 in docs/HANDOFF.md).
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: rollback-webhook
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 1h
+
+receivers:
+  - name: rollback-webhook
+    webhook_configs:
+      - url: http://rollback-ctrl:8000/webhook
+        send_resolved: true
