@@ -1,5 +1,10 @@
 import logging
 
+from django.contrib.auth.decorators import login_required
+from django.db.models import Count
+from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 from rest_framework import mixins
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -147,3 +152,122 @@ def _ml_global_search_view():
 def get_ml_global_search_view():
     """Return MlGlobalSearchView class, instantiated lazily."""
     return _ml_global_search_view()
+
+
+# ---------------------------------------------------------------------------
+# Feedback UI views (R4) — standalone Django template pages at /ml-ui/*.
+# Reuse the same side-effect chain as FeedbackViewSet: row insert, Redpanda
+# event, ml-gateway metric hook. See docs/superpowers/specs/2026-04-18-feedback-ui-design.md.
+# ---------------------------------------------------------------------------
+
+
+@login_required
+def ui_index(request):
+    from documents.models import Document
+
+    docs = (
+        Document.objects.all()
+        .annotate(ml_feedback_count=Count("ml_feedback"))
+        .order_by("-created")[:20]
+    )
+    return render(request, "ml_hooks/index.html", {"docs": docs})
+
+
+@login_required
+def ui_doc_feedback(request, pk: int):
+    from documents.models import Document
+
+    doc = get_object_or_404(Document, pk=pk)
+
+    if request.method == "POST":
+        corrected = (request.POST.get("corrected_text") or "").strip()
+        if not corrected:
+            return render(
+                request,
+                "ml_hooks/doc_feedback.html",
+                {"doc": doc, "error": "Correction text cannot be empty."},
+            )
+        fb = Feedback.objects.create(
+            document=doc,
+            user=request.user if request.user.is_authenticated else None,
+            kind=Feedback.Kind.HTR_CORRECTION,
+            correction_text=corrected,
+        )
+        try:
+            events.publish_correction_event(fb)
+        except Exception as exc:
+            log.warning("ml_hooks ui: correction event publish failed: %s", exc)
+        ml_client.post_fire_and_forget("/metrics/correction-recorded")
+        return HttpResponseRedirect(
+            reverse("ml_ui_doc_feedback", args=[doc.id]) + "?saved=1",
+        )
+
+    recent_feedback = (
+        Feedback.objects.filter(document=doc).order_by("-created_at")[:10]
+    )
+    char_count = len(doc.content or "")
+    return render(
+        request,
+        "ml_hooks/doc_feedback.html",
+        {
+            "doc": doc,
+            "recent_feedback": recent_feedback,
+            "char_count": char_count,
+            "saved": request.GET.get("saved"),
+        },
+    )
+
+
+@login_required
+def ui_search_feedback(request):
+    from documents.models import Document
+
+    if request.method == "POST":
+        doc_id = request.POST.get("document") or ""
+        try:
+            rating = int(request.POST.get("rating", "0"))
+        except ValueError:
+            rating = 0
+        query_text = request.POST.get("q") or ""
+        doc = get_object_or_404(Document, pk=doc_id)
+        fb = Feedback.objects.create(
+            document=doc,
+            user=request.user if request.user.is_authenticated else None,
+            kind=Feedback.Kind.SEARCH_RATING,
+            rating=1 if rating == 1 else 0,
+            query_text=query_text,
+        )
+        try:
+            events.publish_feedback_event(fb)
+        except Exception as exc:
+            log.warning("ml_hooks ui: feedback event publish failed: %s", exc)
+        redirect = reverse("ml_ui_search")
+        return HttpResponseRedirect(
+            f"{redirect}?q={query_text}&rated={doc_id}",
+        )
+
+    query = (request.GET.get("q") or "").strip()
+    results: list[dict] = []
+    error = None
+    if len(query) >= 3:
+        try:
+            payload = ml_client.post(
+                "/search/query",
+                {"query_text": query, "top_k": 5},
+            )
+            results = payload.get("results") or []
+        except Exception as exc:
+            log.warning("ml_hooks ui: search backend unavailable: %s", exc)
+            error = str(exc)
+
+    return render(
+        request,
+        "ml_hooks/search_feedback.html",
+        {
+            "query": query,
+            "results": results,
+            "error": error,
+            "rated": request.GET.get("rated"),
+            "saved": request.GET.get("rated"),
+        },
+    )

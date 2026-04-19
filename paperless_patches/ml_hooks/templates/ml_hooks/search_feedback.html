@@ -1,0 +1,56 @@
+{% extends "ml_hooks/base.html" %}
+{% block title %}Search feedback{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Rate search results</h2>
+  <p class="muted">
+    Run a query, then thumbs-up results that felt relevant and thumbs-down
+    those that didn't. Ratings are published to <code>paperless.feedback</code>
+    and consumed by the retraining pipeline to fine-tune the bi-encoder.
+  </p>
+  <form method="get" style="display:flex; gap:10px;">
+    <input type="search" name="q" value="{{ query }}" placeholder="Search your documents…" autofocus>
+    <button type="submit">Search</button>
+  </form>
+</div>
+
+{% if query %}
+<div class="card">
+  <h2>Results for &ldquo;{{ query }}&rdquo;</h2>
+  {% if error %}
+    <p class="muted">Search backend returned an error: {{ error }}</p>
+  {% elif not results %}
+    <p class="muted">No results. Try a different query (≥3 characters).</p>
+  {% else %}
+    {% for r in results %}
+    <div class="result">
+      <h3>
+        <a href="/documents/{{ r.document_id }}/" target="_blank">Document {{ r.document_id }}</a>
+        <span class="score">{{ r.similarity_score }}</span>
+      </h3>
+      <div class="muted" style="margin-bottom:8px;">
+        Chunk {{ r.chunk_index }} · {{ r.chunk_text|truncatechars:200 }}
+      </div>
+      <form method="post" class="inline">
+        {% csrf_token %}
+        <input type="hidden" name="q" value="{{ query }}">
+        <input type="hidden" name="document" value="{{ r.document_id }}">
+        <input type="hidden" name="rating" value="1">
+        <button type="submit" class="thumb ghost" title="Relevant">👍</button>
+      </form>
+      <form method="post" class="inline">
+        {% csrf_token %}
+        <input type="hidden" name="q" value="{{ query }}">
+        <input type="hidden" name="document" value="{{ r.document_id }}">
+        <input type="hidden" name="rating" value="0">
+        <button type="submit" class="thumb ghost" title="Not relevant">👎</button>
+      </form>
+      {% if rated and rated == r.document_id|stringformat:"s" %}
+        <span class="muted" style="margin-left:12px;">✓ rating saved</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

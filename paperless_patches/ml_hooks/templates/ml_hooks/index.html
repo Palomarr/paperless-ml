@@ -1,0 +1,32 @@
+{% extends "ml_hooks/base.html" %}
+{% block title %}Recent documents{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Recent documents</h2>
+  <p class="muted">Click a document to review its transcription and submit corrections. Corrections feed the retraining pipeline via <code>paperless.corrections</code>.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Title</th>
+        <th>Created</th>
+        <th>Feedback count</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for doc in docs %}
+      <tr>
+        <td>{{ doc.id }}</td>
+        <td>{{ doc.title|default:"(untitled)" }}</td>
+        <td class="muted">{{ doc.created|date:"Y-m-d H:i" }}</td>
+        <td>{{ doc.ml_feedback_count }}</td>
+        <td><a class="btn ghost" href="{% url 'ml_ui_doc_feedback' doc.id %}">Review →</a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="muted">No documents yet. Upload one at <a href="/">Paperless</a>.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "ml_hooks/base.html" %}
+{% block title %}Correct doc {{ doc.id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Document {{ doc.id }} — {{ doc.title|default:"(untitled)" }}</h2>
+  <p class="muted">
+    Created {{ doc.created|date:"Y-m-d H:i" }}
+    {% if doc.page_count %}· {{ doc.page_count }} page{{ doc.page_count|pluralize }}{% endif %}
+    · <a href="/documents/{{ doc.id }}/" target="_blank">Open in Paperless ↗</a>
+  </p>
+  <p class="muted">
+    Edit the transcription below if the HTR/OCR output is wrong. Your correction
+    is saved as <code>Feedback(kind=htr_correction)</code>, published to
+    <code>paperless.corrections</code>, and increments
+    <code>htr_corrections_total</code> for the rollback alert.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <textarea name="corrected_text" spellcheck="true">{{ doc.content|default:"" }}</textarea>
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+      <button type="submit">Save correction</button>
+      <a class="btn ghost" href="{% url 'ml_ui_index' %}">Cancel</a>
+      <span class="muted">{{ char_count }} character{{ char_count|pluralize }}</span>
+    </div>
+  </form>
+</div>
+
+{% if recent_feedback %}
+<div class="card">
+  <h2>Recent feedback on this document</h2>
+  <table>
+    <thead><tr><th>When</th><th>User</th><th>Kind</th><th>Preview</th></tr></thead>
+    <tbody>
+      {% for fb in recent_feedback %}
+      <tr>
+        <td class="muted">{{ fb.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ fb.user.username|default:"—" }}</td>
+        <td>{{ fb.kind }}</td>
+        <td class="muted">{{ fb.correction_text|default:fb.query_text|truncatechars:80 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

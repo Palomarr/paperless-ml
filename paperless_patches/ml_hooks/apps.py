@@ -57,7 +57,17 @@ class MlHooksConfig(AppConfig):
                 name="ml_global_search",
             ),
         )
+        # 3. /ml-ui/* — Django template feedback UI (R4).
+        #    HTR correction editor + search rating thumbs. Pure additive;
+        #    Paperless's Angular SPA at / is untouched.
+        paperless_urls.urlpatterns.insert(
+            0,
+            re_path(r"^ml-ui/", include("ml_hooks.urls_ui")),
+        )
 
         setattr(paperless_urls, marker, True)
         clear_url_caches()
-        log.info("ml_hooks: mounted /api/ml/ routes and /api/search/ override")
+        log.info(
+            "ml_hooks: mounted /api/ml/ routes, /api/search/ override, "
+            "and /ml-ui/ feedback UI",
+        )

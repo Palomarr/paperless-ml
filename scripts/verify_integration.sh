@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the paperless-ngx + ml_hooks overlay integration end-to-end.
-# Runs 12 checkpoints against a locally-brought-up docker compose stack.
+# Runs 13 checkpoints against a locally-brought-up docker compose stack.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -335,11 +335,75 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 13: feedback UI reachable + round-trips ----------
+info "Checkpoint 13: /ml-ui/ reachable + correction round-trip writes row"
+ok_index=0; ok_doc=0; ok_submit=0; ok_row=0
+
+# 13a: index renders (login_required redirects anonymous, so auth as admin)
+ui_code="$(curl -s -o /tmp/ml_ui_body -w '%{http_code}' -u admin:admin \
+    http://localhost:8000/ml-ui/ || echo 000)"
+if [[ "$ui_code" == "200" ]]; then
+    ok_index=1
+fi
+
+# 13b: per-doc feedback page renders
+if [[ -n "${LATEST_DOC_ID:-}" ]] && [[ "$LATEST_DOC_ID" -gt 0 ]]; then
+    doc_code="$(curl -s -o /dev/null -w '%{http_code}' -u admin:admin \
+        "http://localhost:8000/ml-ui/doc/${LATEST_DOC_ID}/" || echo 000)"
+    if [[ "$doc_code" == "200" ]]; then
+        ok_doc=1
+    fi
+fi
+
+# 13c: POST a correction via the UI; server issues a redirect on success.
+# Need the CSRF cookie + token for the form post.
+if [[ -n "${LATEST_DOC_ID:-}" ]] && [[ "$LATEST_DOC_ID" -gt 0 ]]; then
+    COOKIE_JAR="$(mktemp)"
+    csrf="$(curl -s -u admin:admin -c "$COOKIE_JAR" \
+        "http://localhost:8000/ml-ui/doc/${LATEST_DOC_ID}/" \
+        | grep -oE 'name="csrfmiddlewaretoken" value="[^"]+"' \
+        | head -1 | sed 's/.*value="//;s/".*//')"
+    if [[ -n "$csrf" ]]; then
+        submit_code="$(curl -s -o /dev/null -w '%{http_code}' \
+            -u admin:admin -b "$COOKIE_JAR" \
+            -X POST "http://localhost:8000/ml-ui/doc/${LATEST_DOC_ID}/" \
+            -H "Referer: http://localhost:8000/ml-ui/doc/${LATEST_DOC_ID}/" \
+            --data-urlencode "csrfmiddlewaretoken=${csrf}" \
+            --data-urlencode "corrected_text=verify harness UI correction" \
+            || echo 000)"
+        # Successful Django POST with login_required returns 302 (redirect to ?saved=1)
+        if [[ "$submit_code" == "302" ]]; then
+            ok_submit=1
+        fi
+    fi
+    rm -f "$COOKIE_JAR"
+fi
+
+# 13d: new feedback row visible via the API (should include our latest correction)
+if (( ok_submit )); then
+    sleep 1
+    fb_json="$(curl -s -u admin:admin http://localhost:8000/api/ml/feedback/ || echo '[]')"
+    if echo "$fb_json" | grep -q "verify harness UI correction"; then
+        ok_row=1
+    fi
+fi
+
+if (( ok_index && ok_doc && ok_submit && ok_row )); then
+    pass "/ml-ui/ reachable, per-doc page renders, POST created feedback row"
+else
+    (( ok_index )) || fail "GET /ml-ui/ did not return 200 (got: ${ui_code:-<empty>})"
+    (( ok_doc ))   || fail "GET /ml-ui/doc/<id>/ did not return 200 (got: ${doc_code:-<empty>})"
+    (( ok_submit )) || fail "POST /ml-ui/doc/<id>/ did not redirect 302 (got: ${submit_code:-<empty>})"
+    (( ok_row ))   || fail "Feedback row with UI correction text not visible via /api/ml/feedback/"
+    exit 1
+fi
+
 # ---------- done ----------
 echo
-pass "All 12 checkpoints passed."
+pass "All 13 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
+echo "  Feedback UI:   http://localhost:8000/ml-ui/"
 echo "  Feedback API:  http://localhost:8000/api/ml/feedback/"
 echo "  Prometheus:    http://localhost:9090/alerts"
 echo "  Alertmanager:  http://localhost:9093"
