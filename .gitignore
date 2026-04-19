@@ -21,3 +21,6 @@ Thumbs.db
 checklist.json
 tasks.json
 .claude
+
+# Local session handoff notes (not tracked; per-developer)
+docs/HANDOFF.md
