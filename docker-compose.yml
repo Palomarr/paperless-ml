@@ -124,9 +124,17 @@ services:
       timeout: 3s
       retries: 20
 
-  # One-shot: create the paperless-images bucket with anonymous read.
-  # Matches the bucket name expected by contracts/htr_input.json
-  # (s3://paperless-images/documents/<uuid>/regions/<uuid>.png).
+  # One-shot: create the two MinIO buckets.
+  #   paperless-images    — HTR region crops (anonymous read; matches
+  #                         contracts/htr_input.json crop_s3_url pattern)
+  #   paperless-datalake  — archival / training-data warehouse. Private.
+  #                         Bucket name matches Elnath's paperless_data
+  #                         convention so future retraining code that
+  #                         reads s3://paperless-datalake/warehouse/... works
+  #                         against either MinIO. In production this bucket
+  #                         is the analog of CHI@TACC persistent object
+  #                         storage (architecture.html:935-936). See
+  #                         docs/DEPLOYMENT.md §10 for the warehouse layout.
   minio-init:
     image: minio/mc:RELEASE.2024-10-02T08-27-28Z
     depends_on:
@@ -139,7 +147,12 @@ services:
         mc alias set local http://minio:9000 minioadmin minioadmin
         mc mb --ignore-existing local/paperless-images
         mc anonymous set download local/paperless-images
-        echo "minio-init: paperless-images bucket ready"
+        mc mb --ignore-existing local/paperless-datalake
+        # Placeholder object makes the warehouse/ prefix visible in the
+        # MinIO console even before the first real export lands.
+        echo "paperless-datalake warehouse placeholder" \
+          | mc pipe local/paperless-datalake/warehouse/.keep
+        echo "minio-init: paperless-images (public read) + paperless-datalake (private) ready"
     restart: "no"
 
   # Event streaming for search events, feedback events, HTR corrections.
@@ -260,6 +273,10 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      # Warehouse bucket for archival / training data. Analog of CHI@TACC
+      # persistent object store; see docs/DEPLOYMENT.md §10.
+      WAREHOUSE_BUCKET: paperless-datalake
+      WAREHOUSE_PREFIX: warehouse
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
@@ -316,6 +333,10 @@ services:
       ML_GATEWAY_URL: "http://ml-gateway:8000"
       ML_GATEWAY_TIMEOUT: "30"
       REDPANDA_PROXY_URL: "http://redpanda:8082"
+      # Warehouse bucket for feedback-archival exports. Read by future
+      # retraining pipelines; see docs/DEPLOYMENT.md §10.
+      WAREHOUSE_BUCKET: paperless-datalake
+      WAREHOUSE_PREFIX: warehouse
     volumes:
       - ./paperless_patches:/usr/src/paperless/patches
       - paperless_data:/usr/src/paperless/data

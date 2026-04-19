@@ -132,3 +132,44 @@ docker compose -f docker-compose.yml -f docker-compose.shared.yml down
 - **Secrets management** — dev credentials (`admin/admin`,
   `minioadmin/minioadmin`) are baked in. Any real deployment must
   externalise these; see `docs/SAFEGUARDING.md` §3 Transparency.
+
+## 10. MinIO bucket layout — `paperless-images` vs `paperless-datalake`
+
+The stack creates two MinIO buckets via `minio-init`:
+
+| Bucket | Contents | Access | Purpose |
+|---|---|---|---|
+| `paperless-images` | HTR region crops (`documents/<uuid>/regions/<uuid>.png`) | Anonymous download | Short-lived working storage. Elnath's region slicer writes crops here; our `ml-gateway` fetches them for TrOCR inference. |
+| `paperless-datalake` | Training datasets, feedback exports, model artifacts (under `warehouse/<name>/`) | Private (requires MinIO credentials) | Archival / retraining feed. Bucket name + `warehouse/` prefix match the convention in Elnath's `paperless_data` repo (see `batch_pipeline/batch_htr.py:50` and `ingestion/ingest_iam.py:28`). |
+
+### The `warehouse/` prefix
+
+Objects in `paperless-datalake` are organized as:
+
+```
+paperless-datalake/
+└── warehouse/
+    ├── .keep                        ← placeholder so the prefix is visible in MinIO console
+    ├── feedback/                    ← future: exported HTR corrections (Parquet shards)
+    ├── htr_training/                ← Elnath's batch pipeline output
+    ├── iam_dataset/                 ← IAM handwriting dataset shards
+    ├── retrieval_training/          ← bi-encoder training pairs
+    └── squad_dataset/               ← SQuAD retrieval eval split
+```
+
+ml-gateway and paperless-web both receive `WAREHOUSE_BUCKET=paperless-datalake`
+and `WAREHOUSE_PREFIX=warehouse` via environment variables, so any future
+code (feedback-archival task, retraining DAG input stage, model-artifact
+writer) reads the path from env rather than hardcoding.
+
+### Relation to CHI@TACC
+
+Architecture line 935–936 names **CHI@TACC object storage** as the
+authoritative persistent store for training datasets and ingested data,
+surviving VM deletion. Our `paperless-datalake` bucket is a stand-in for
+that: same bucket/prefix layout, same access semantics, ephemeral to the
+compose stack. Swapping to real CHI@TACC in a production deployment is
+an endpoint change only — point MinIO's `server` at a CHI@TACC S3
+endpoint, or override `WAREHOUSE_BUCKET` and point the clients directly
+at `https://chi.tacc.chameleoncloud.org:7480/...`. No code changes
+required in ml-gateway or ml_hooks.
