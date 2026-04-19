@@ -73,19 +73,16 @@ are not exposed on the floating IP and stay on the compose default network.
 The setup script brings up **our** stack with the shared-network overlay
 attached — but Elnath's consumer stack is not started automatically.
 For a full end-to-end HTR flow (Paperless upload → event → consumer →
-HTR → postgres), also bring up the peer stacks:
+HTR → postgres), also bring up the peer stacks on plain `main` (D1 + D3
+merged upstream on 2026-04-19, no branch checkout required):
 
 ```bash
 # Elnath's data stack (postgres, MinIO, redpanda — his own compose)
 cd ~/paperless_data
 sg docker -c 'make up'
 
-# Elnath's HTR consumer (requires the feat/connect-to-paperless-ml-shared-net
-# branch for shared-network patches; see D1 in docs/HANDOFF.md). Once D1 is
-# merged upstream, plain main works.
-cd ~/paperless_data_integration
-# git checkout feat/connect-to-paperless-ml-shared-net    # only until D1 merges
-cd htr_consumer
+# Elnath's HTR consumer
+cd ~/paperless_data_integration/htr_consumer
 sg docker -c 'docker compose up -d'
 ```
 

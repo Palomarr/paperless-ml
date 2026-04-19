@@ -121,10 +121,7 @@ else
     clone_if_missing "https://github.com/REDES01/paperless_data_integration.git" \
                      "${PROJECT_PARENT}/paperless_data_integration"
 
-    warn "Peer repos cloned from REDES01 main. Path A integration requires the"
-    warn "feat/connect-to-paperless-ml-shared-net branch on paperless_data_integration"
-    warn "(see D1 in docs/HANDOFF.md). Without it, htr_consumer won't attach to"
-    warn "paperless_ml_net and end-to-end HTR round-trips won't reach our stack."
+    ok "Peer repos on plain main (D1 + D3 merged upstream). Path A works end-to-end."
 fi
 
 # ===========================================================================
