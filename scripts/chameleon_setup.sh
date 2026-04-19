@@ -183,6 +183,7 @@ echo "  Prometheus alerts           : http://${FLOATING_IP}:9090/alerts"
 echo "  Alertmanager                : http://${FLOATING_IP}:9093"
 echo "  Qdrant dashboard            : http://${FLOATING_IP}:6333/dashboard"
 echo "  MinIO console               : http://${FLOATING_IP}:9001   (minioadmin / minioadmin)"
+echo "  MLflow UI                   : http://${FLOATING_IP}:5050"
 echo
 echo "Path A (optional end-to-end HTR round-trip with Elnath's stacks):"
 echo "  See docs/DEPLOYMENT.md §5 for bring-up of paperless_data + paperless_data_integration."

@@ -148,10 +148,13 @@ services:
         mc mb --ignore-existing local/paperless-images
         mc anonymous set download local/paperless-images
         mc mb --ignore-existing local/paperless-datalake
-        # Placeholder object makes the warehouse/ prefix visible in the
-        # MinIO console even before the first real export lands.
+        # Placeholder objects make the warehouse/ and mlflow-artifacts/
+        # prefixes visible in the MinIO console even before the first
+        # real export/run lands.
         echo "paperless-datalake warehouse placeholder" \
           | mc pipe local/paperless-datalake/warehouse/.keep
+        echo "paperless-datalake mlflow-artifacts placeholder" \
+          | mc pipe local/paperless-datalake/mlflow-artifacts/.keep
         echo "minio-init: paperless-images (public read) + paperless-datalake (private) ready"
     restart: "no"
 
@@ -283,6 +286,72 @@ services:
       timeout: 3s
       retries: 12
       start_period: 90s      # first boot loads TrOCR + mpnet into memory
+
+  # One-shot: create the 'mlflow' database inside our shared postgres.
+  # Postgres only runs /docker-entrypoint-initdb.d/*.sql on first boot,
+  # so on an existing volume that was initialized by Paperless, that path
+  # doesn't run. We use a psql-based idempotent init instead.
+  mlflow-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: paperless
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if psql -h postgres -U paperless -lqt | cut -d \| -f 1 | grep -qw mlflow; then
+          echo "mlflow-db-init: database 'mlflow' already exists"
+        else
+          psql -h postgres -U paperless -d paperless -c "CREATE DATABASE mlflow"
+          echo "mlflow-db-init: created 'mlflow' database"
+        fi
+    restart: "no"
+
+  # MLflow tracking server (architecture.html tier 5, lines 995-998).
+  #   Backend store   : mlflow DB in our shared postgres (see mlflow-db-init)
+  #   Artifact store  : s3://paperless-datalake/mlflow-artifacts/ on our MinIO
+  #   Tracking URI    : http://mlflow:5000    (inside compose network)
+  #                     http://<floating-ip>:5050   (from host/browser)
+  # Training containers (dev/training branch) set MLFLOW_TRACKING_URI to
+  # http://mlflow:5000 and log params/metrics/artifacts here. Quality gates
+  # in eval.py then call mlflow.register_model() on the gated runs.
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.9.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mlflow-db-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "5050:5000"         # host 5050 -> container 5000 (MLflow default)
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      # Permit access via any Host header (needed when reached via floating IP)
+      MLFLOW_SERVER_ALLOWED_HOSTS: "*"
+    command: >
+      /bin/sh -c "pip install --quiet psycopg2-binary boto3 &&
+      mlflow server
+      --backend-store-uri postgresql://paperless:paperless@postgres/mlflow
+      --artifacts-destination s3://paperless-datalake/mlflow-artifacts/
+      --serve-artifacts
+      --host 0.0.0.0
+      --port 5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:5000/health',timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   # Fallback stub for fast iteration without building the real serving image.
   # Opt-in: `docker compose --profile stub up -d fastapi-stub paperless-web ...`

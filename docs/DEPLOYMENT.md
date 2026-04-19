@@ -63,6 +63,7 @@ Once the script finishes it prints the public URLs. With floating IP `X.X.X.X`:
 | Alertmanager | `http://X.X.X.X:9093` | — |
 | Qdrant dashboard | `http://X.X.X.X:6333/dashboard` | — |
 | MinIO console | `http://X.X.X.X:9001` | minioadmin / minioadmin |
+| MLflow UI | `http://X.X.X.X:5050` | — |
 
 Internal-only services (postgres, redis, redpanda kafka, alertmanager webhook)
 are not exposed on the floating IP and stay on the compose default network.
