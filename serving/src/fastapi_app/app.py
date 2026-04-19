@@ -171,6 +171,21 @@ HTR_CONFIDENCE_THRESHOLD = float(os.environ.get("HTR_CONFIDENCE_THRESHOLD", "0.5
 RETRIEVAL_MODEL_VERSION = os.environ.get("RETRIEVAL_MODEL_VERSION", "retrieval_v1")
 SIMILARITY_THRESHOLD = 0.4
 
+# Startup banner — pins each deployed run to an explicit model version in the
+# container logs. This is the accountability breadcrumb referenced in
+# docs/SAFEGUARDING.md §5 ("Add a startup log line in fastapi_app/app.py that
+# records HTR_MODEL_VERSION and RETRIEVAL_MODEL_VERSION at service boot").
+print(
+    f"ml-gateway startup: HTR_MODEL_VERSION={HTR_MODEL_VERSION} "
+    f"RETRIEVAL_MODEL_VERSION={RETRIEVAL_MODEL_VERSION} "
+    f"HTR_CONFIDENCE_THRESHOLD={HTR_CONFIDENCE_THRESHOLD} "
+    f"SIMILARITY_THRESHOLD={SIMILARITY_THRESHOLD} "
+    f"device={device} "
+    f"QDRANT={QDRANT_HOST}:{QDRANT_PORT} "
+    f"USE_MOCK_CHUNKS={USE_MOCK_CHUNKS}",
+    flush=True,
+)
+
 # ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------

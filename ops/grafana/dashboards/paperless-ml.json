@@ -123,6 +123,70 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "HTR correction rate (1h rolling) — alert threshold 0.30",
+      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "rate(htr_corrections_total[1h]) / rate(htr_requests_total[1h]). Above 0.30 fires HTRCorrectionRateHigh; see architecture.html:976.",
+      "targets": [
+        {
+          "expr": "rate(htr_corrections_total[1h]) / rate(htr_requests_total[1h])",
+          "legendFormat": "correction rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.3, "color": "red" }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": { "mode": "line" }
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Search CTR (2h rolling) — alert threshold 0.15",
+      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "rate(search_clicks_total[2h]) / rate(search_queries_total[2h]). Below 0.15 fires SearchCTRLow; see architecture.html:977.",
+      "targets": [
+        {
+          "expr": "rate(search_clicks_total[2h]) / rate(search_queries_total[2h])",
+          "legendFormat": "CTR",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 0.15, "color": "green" }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": { "mode": "line" }
+          }
+        }
+      }
     }
   ]
 }
