@@ -81,9 +81,10 @@ log "Step 1/4: querying MLflow for latest registered version of '${MODEL_NAME}'"
 # Use the mlflow container's Python env (already has mlflow + boto3 installed).
 # `-T` disables TTY so we can capture stdout into a shell variable.
 VERSION=$(docker compose exec -T mlflow python - <<PYEOF 2>/dev/null
-import sys
+import sys, mlflow
 from mlflow import MlflowClient
-client = MlflowClient(tracking_uri="http://localhost:5000")
+mlflow.set_tracking_uri("http://localhost:5000")
+client = MlflowClient()
 versions = client.search_model_versions(f"name='${MODEL_NAME}'")
 if not versions:
     sys.stderr.write("no registered versions\n")
@@ -110,9 +111,18 @@ fi
 log "Step 2/4: staging artifacts from MLflow to local /tmp/model-v${VERSION}"
 docker compose exec -T mlflow python - <<PYEOF
 import os, shutil, sys
+import mlflow
 import mlflow.artifacts
 from mlflow import MlflowClient
-client = MlflowClient(tracking_uri="http://localhost:5000")
+
+# Set tracking URI GLOBALLY (process-level). MlflowClient(tracking_uri=...)
+# scopes to a single client instance, but mlflow.artifacts.download_artifacts
+# internally uses ModelsArtifactRepository which reads only the global URI.
+# Without this, it silently falls back to a local SQLite store and can't
+# resolve models:/m-<UUID> URIs from the real registry.
+mlflow.set_tracking_uri("http://localhost:5000")
+
+client = MlflowClient()
 vinfo = client.get_model_version("${MODEL_NAME}", "${VERSION}")
 
 # Clean + re-stage so repeated runs don't mix older files in.
