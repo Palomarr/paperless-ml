@@ -129,19 +129,30 @@ ok "artifacts staged"
 # ---------- step 3: copy to MinIO serving path ----------
 log "Step 3/4: copying to s3://${WAREHOUSE_BUCKET}/warehouse/models/v${VERSION}/"
 
-# Use mc from inside the minio-init image which already has it. We run it
-# one-shot with --rm; network is our compose network so the hostname 'minio'
-# resolves. The staged artifacts are inside the mlflow container, so we
-# tar→pipe them across.
-docker compose exec -T mlflow tar -C "/tmp/model-v${VERSION}" -cf - . \
-    | docker compose run --rm --no-deps -T --entrypoint "/bin/sh" minio-init -c "
-    set -eu
-    mkdir -p /staging
-    tar -C /staging -xf -
-    mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null
-    mc cp --recursive /staging/ local/${WAREHOUSE_BUCKET}/warehouse/models/v${VERSION}/
-    mc ls local/${WAREHOUSE_BUCKET}/warehouse/models/v${VERSION}/
-"
+# Upload in-place from the mlflow container using boto3 (already pip-installed
+# by our compose command). Avoids cross-container plumbing — minio/mc is a
+# scratch image without tar, and adding tar to it would mean a custom image.
+docker compose exec -T mlflow python - <<PYEOF
+import boto3, os
+s3 = boto3.client(
+    "s3",
+    endpoint_url="http://minio:9000",
+    aws_access_key_id="minioadmin",
+    aws_secret_access_key="minioadmin",
+)
+src = f"/tmp/model-v${VERSION}"
+prefix = f"warehouse/models/v${VERSION}/"
+bucket = "${WAREHOUSE_BUCKET}"
+uploaded = 0
+for root, _, files in os.walk(src):
+    for f in files:
+        fp = os.path.join(root, f)
+        key = prefix + os.path.relpath(fp, src).replace(os.sep, "/")
+        s3.upload_file(fp, bucket, key)
+        print(f"  uploaded {key}")
+        uploaded += 1
+print(f"total: {uploaded} objects under s3://{bucket}/{prefix}")
+PYEOF
 ok "uploaded to s3://${WAREHOUSE_BUCKET}/warehouse/models/v${VERSION}/"
 
 # ---------- step 4: signal ml-gateway to reload ----------
