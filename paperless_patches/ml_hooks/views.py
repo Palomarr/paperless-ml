@@ -1,12 +1,13 @@
+import functools
 import logging
 
-from django.contrib.auth.decorators import login_required
 from django.db.models import Count
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from rest_framework import mixins
 from rest_framework import viewsets
+from rest_framework.authentication import BasicAuthentication
 from rest_framework.permissions import IsAuthenticated
 
 from ml_hooks import events
@@ -15,6 +16,36 @@ from ml_hooks.models import Feedback
 from ml_hooks.serializers import FeedbackSerializer
 
 log = logging.getLogger("paperless.ml_hooks.views")
+
+
+def _ui_login_required(view_func):
+    """Like django.contrib.auth.decorators.login_required, but also accepts DRF Basic Auth.
+
+    Plain Django views rely on session middleware to populate request.user
+    from the session cookie. Scripts using `curl -u user:pass` send a Basic
+    Auth header that Django's session middleware ignores, so the stock
+    login_required decorator would 302-redirect to the login page. We mirror
+    DRF's BasicAuthentication here so the UI works for both browser users
+    (session cookie) and scripts (Basic Auth).
+    """
+
+    @functools.wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            try:
+                result = BasicAuthentication().authenticate(request)
+            except Exception:
+                result = None
+            if result:
+                request.user = result[0]
+
+        if not request.user.is_authenticated:
+            from django.contrib.auth.views import redirect_to_login
+
+            return redirect_to_login(request.get_full_path())
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
 
 
 class FeedbackViewSet(
@@ -161,7 +192,7 @@ def get_ml_global_search_view():
 # ---------------------------------------------------------------------------
 
 
-@login_required
+@_ui_login_required
 def ui_index(request):
     from documents.models import Document
 
@@ -173,7 +204,7 @@ def ui_index(request):
     return render(request, "ml_hooks/index.html", {"docs": docs})
 
 
-@login_required
+@_ui_login_required
 def ui_doc_feedback(request, pk: int):
     from documents.models import Document
 
@@ -218,7 +249,7 @@ def ui_doc_feedback(request, pk: int):
     )
 
 
-@login_required
+@_ui_login_required
 def ui_search_feedback(request):
     from documents.models import Document
 
