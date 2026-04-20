@@ -213,18 +213,14 @@ if [[ -n "$PAPERLESS_TOKEN" ]]; then
     echo
     if (( ! SKIP_PEERS )); then
         echo "Run Elnath's production-traffic generator (optional):"
-        echo "  cd ${PROJECT_PARENT}/paperless_data/data_generator"
-        echo "  sg docker -c 'docker build -t paperless-data-generator .'"
-        echo "  sg docker -c 'docker run --rm --network paperless_ml_net \\"
-        echo "    -e PAPERLESS_TOKEN=${PAPERLESS_TOKEN} \\"
-        echo "    paperless-data-generator \\"
-        echo "    --paperless-url http://paperless-webserver-1:8000 \\"
-        echo "    --rate 2.0 --duration 300'"
+        echo "  bash scripts/run_data_generator.sh --rate 2.0 --duration 300"
+        echo "  (wraps token extraction + image build + docker run)"
         echo
     fi
 fi
 echo "Next steps (all optional, independently runnable):"
 echo "  bash scripts/seed_demo.sh --trigger-alert    # populate counters + fire/resolve alert"
+echo "  bash scripts/run_data_generator.sh           # real synthetic traffic via Elnath's generator"
 echo "  bash scripts/verify_integration.sh           # 13-checkpoint integration test"
 echo "  bash scripts/deploy_model.sh                 # MLflow → MinIO → ml-gateway reload"
 echo
