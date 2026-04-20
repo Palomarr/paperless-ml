@@ -35,6 +35,14 @@ services:
         aliases:
           - fastapi_server
 
+  # MLflow on the shared net so external training containers + Elnath's
+  # drift_monitor can reach it via hostname `mlflow:5000` without going
+  # through the host's floating IP.
+  mlflow:
+    networks:
+      default:
+      paperless_ml_net:
+
   minio:
     networks:
       default:
