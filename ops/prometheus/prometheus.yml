@@ -42,6 +42,17 @@ scrape_configs:
         labels:
           service: redpanda
 
+  # Our pipeline scheduler — exposes retraining-trigger decisions +
+  # quality-gate pass/fail counters so failed runs are observable rather
+  # than silently dropped. See ops/pipeline-scheduler/scheduler.py.
+  - job_name: pipeline-scheduler
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pipeline-scheduler:8000"]
+        labels:
+          service: pipeline-scheduler
+          role: platform
+
   # Elnath's drift monitor (REDES01/paperless_data_integration @ ecbcd51).
   # Runs in its own compose stack on paperless_ml_net; bring-up docs:
   # REDES01/paperless_data_integration/drift_monitor/README.md.

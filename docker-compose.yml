@@ -369,6 +369,51 @@ services:
       retries: 12
       start_period: 30s
 
+  # Pipeline scheduler: closes the retrain → evaluate → gate → promote
+  # loop with minimal human intervention. Polls the Feedback table +
+  # time-since-last-run; when BOTH thresholds are met, spawns training
+  # containers for train.py / eval.py / quality_gate.py sequentially and
+  # promotes the new version on gate pass (moves @production alias +
+  # restarts ml-gateway). Symmetric with rollback-ctrl (which swaps the
+  # alias the other way on alert firing). See ops/pipeline-scheduler/
+  # scheduler.py for trigger-rule justification.
+  pipeline-scheduler:
+    build:
+      context: ./ops/pipeline-scheduler
+    restart: unless-stopped
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: paperless-htr
+      PRODUCTION_ALIAS: production
+      TRAINING_IMAGE: paperless-training
+      PAPERLESS_NET: paperless_ml_net
+      ML_GATEWAY_CONTAINER: paperless-ml-ml-gateway-1
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: paperless
+      # Production defaults — see scheduler.py docstring for the
+      # "500 corrections × 24h" justification. Override with
+      # `docker compose run -e MIN_CORRECTIONS_DELTA=0 ...` for demo.
+      POLL_INTERVAL_SECONDS: "600"
+      MIN_CORRECTIONS_DELTA: "500"
+      MIN_HOURS_SINCE_LAST_RUN: "24"
+    volumes:
+      # See rollback-ctrl for the security-note rationale — same tradeoff.
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/metrics',timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
   # Fallback stub for fast iteration without building the real serving image.
   # Opt-in: `docker compose --profile stub up -d fastapi-stub paperless-web ...`
   # When using the stub, also override ML_GATEWAY_URL to point at it.
