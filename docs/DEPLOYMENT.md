@@ -36,16 +36,20 @@ cd ~/paperless-ml
 bash scripts/chameleon_setup.sh
 ```
 
-The script does, in order:
+The script handles host prerequisites that compose can't do itself
+(Docker install, NVIDIA toolkit, peer-repo cloning), then hands off to
+compose — which declares the `paperless_ml_net` shared bridge, creates
+it on first boot, and brings up all services with health-gated
+dependency ordering:
 
-1. `apt install` Docker + helpers, enable service, add `cc` to the `docker` group.
-2. Install the NVIDIA Container Toolkit and configure the Docker runtime.
-3. Clone `REDES01/paperless_data` and `REDES01/paperless_data_integration`
-   as siblings of this repo (for Path A; see §5).
-4. Create the `paperless_ml_net` shared bridge via `scripts/create_network.sh`.
-5. `docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d`
-   to bring up all 13 services with the Path A overlay attached.
-6. Run `scripts/verify_integration.sh` — expects 13/13 checkpoints.
+1. Install Docker + NVIDIA Container Toolkit (skipped if already present).
+2. Clone `REDES01/paperless_data`, `REDES01/paperless_data_integration`,
+   and `gdtmax/paperless_training_integration` as siblings (or pull to latest).
+3. `docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d`
+   — compose self-creates `paperless_ml_net`, brings up services in
+   dependency order, waits for healthchecks.
+4. Extract the Paperless admin API token and print it in the summary.
+5. Run `scripts/verify_integration.sh` (13-checkpoint end-to-end test).
 
 Expected runtime on a cold node: ~8–12 minutes (the ml-gateway image build
 is the long pole — TrOCR weights + PyTorch CPU wheels).

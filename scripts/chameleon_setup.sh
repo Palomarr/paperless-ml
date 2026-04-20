@@ -136,16 +136,11 @@ else
 fi
 
 # ===========================================================================
-# Step 4 — Create shared bridge network (Path A)
+# Step 4 — docker compose up (our stack with shared-network overlay).
+# The paperless_ml_net bridge is declared in docker-compose.yml and
+# self-creates on first boot — no explicit network-create step needed.
 # ===========================================================================
-log "Step 4/6: Creating paperless_ml_net shared bridge"
-sg docker -c "bash ${REPO_ROOT}/scripts/create_network.sh"
-ok "paperless_ml_net ready"
-
-# ===========================================================================
-# Step 5 — docker compose up (our stack with shared-network overlay)
-# ===========================================================================
-log "Step 5/6: Bringing up our stack (13 services + Path A overlay)"
+log "Step 4/6: Bringing up our stack (services + Path A overlay)"
 
 cd "$REPO_ROOT"
 sg docker -c "docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d"
@@ -170,7 +165,7 @@ done
 # Needed by Elnath's data_generator (token auth). Idempotent — reuses any
 # existing token. See scripts/get_paperless_token.sh.
 # ===========================================================================
-log "Step 6/7: Extracting Paperless API token for admin"
+log "Step 5/6: Extracting Paperless API token for admin"
 PAPERLESS_TOKEN="$(sg docker -c "bash ${REPO_ROOT}/scripts/get_paperless_token.sh" 2>/dev/null | tr -d '\r' | tail -n 1)"
 if [[ -z "$PAPERLESS_TOKEN" || "${#PAPERLESS_TOKEN}" -lt 20 ]]; then
     warn "Token extraction returned unexpected output. Retry manually with:"
@@ -184,9 +179,9 @@ fi
 # Step 7 — Run verify_integration.sh
 # ===========================================================================
 if (( SKIP_VERIFY )); then
-    log "Step 7/7: Skipping verify_integration.sh (--skip-verify)"
+    log "Step 6/6: Skipping verify_integration.sh (--skip-verify)"
 else
-    log "Step 7/7: Running verify_integration.sh (13 checkpoints)"
+    log "Step 6/6: Running verify_integration.sh (13 checkpoints)"
     sg docker -c "bash ${REPO_ROOT}/scripts/verify_integration.sh"
 fi
 

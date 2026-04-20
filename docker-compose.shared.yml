@@ -2,12 +2,15 @@
 # network, enabling cross-stack integration with REDES01/paperless_data_integration
 # (the data role's htr_consumer and related workers).
 #
-# Standalone dev mode (no shared network):
+# Standalone dev mode (our stack only):
 #   docker compose up -d
 #
 # Integrated mode (with data-role's consumers):
-#   ./scripts/create_network.sh
 #   docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d
+#
+# The paperless_ml_net network itself is declared in docker-compose.yml and
+# compose creates it on first boot — no external `docker network create`
+# needed. Elnath's compose projects attach as `external: true`.
 #
 # Services attached to the shared net are the ones external consumers need.
 # postgres (Paperless's own DB) and qdrant stay internal to avoid DNS
@@ -52,7 +55,3 @@ services:
     networks:
       default:
       paperless_ml_net:
-
-networks:
-  paperless_ml_net:
-    external: true

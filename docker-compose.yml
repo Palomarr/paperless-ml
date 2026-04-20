@@ -425,3 +425,13 @@ volumes:
   paperless_media:
   paperless_consume:
   paperless_export:
+
+# Shared bridge network for cross-stack attach (Path A). Declared here so
+# `docker compose up -d` creates it on first boot — no external `docker
+# network create` step required. Elnath's stacks in REDES01/paperless_data
+# and paperless_data_integration attach via `external: true` referencing
+# this same name.
+networks:
+  paperless_ml_net:
+    name: paperless_ml_net
+    driver: bridge
