@@ -155,8 +155,7 @@ done
 # Our own /htr endpoint isn't called in standalone mode (Elnath's consumer is
 # the usual caller). Without it, the HTR-correction-rate Grafana panel's
 # denominator is zero and the ratio is NaN. Fire a few direct TrOCR calls
-# with a 1×1 PNG base64 so the counter is non-zero. The resulting HTR output
-# is garbage but that's fine — we're seeding metrics, not training data.
+# with a 1×1 PNG base64 so the counter is non-zero.
 log "Firing 5 synthetic /htr calls (1×1 PNG) to populate htr_requests_total"
 TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 for i in 1 2 3 4 5; do

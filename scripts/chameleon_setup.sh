@@ -3,7 +3,7 @@
 # chameleon_setup.sh — one-command bring-up of the Paperless-ML stack on a
 # fresh Chameleon CHI@UC bare-metal node.
 #
-# Assumes gpu_p100 or gpu_rtx_6000 node with NVIDIA drivers pre-installed
+# Assumes gpu_p100 node with NVIDIA drivers pre-installed
 # by the CC-Ubuntu24.04-CUDA image. Running on any other hardware will fail
 # loudly at the nvidia-container-toolkit install step — that's intentional.
 #
@@ -99,7 +99,7 @@ else
 fi
 
 # ===========================================================================
-# Step 3 — Clone peer repos (Elnath's data stack + consumer) as siblings
+# Step 3 — Clone peer repos as siblings
 # ===========================================================================
 if (( SKIP_PEERS )); then
     log "Step 3/6: Skipping peer-repo clone (--skip-peers)"
@@ -162,8 +162,8 @@ done
 
 # ===========================================================================
 # Step 6 — Extract Paperless API token for the admin user.
-# Needed by Elnath's data_generator (token auth). Idempotent — reuses any
-# existing token. See scripts/get_paperless_token.sh.
+# Needed by Elnath's data_generator (token auth). Idempotent. 
+# See scripts/get_paperless_token.sh.
 # ===========================================================================
 log "Step 5/6: Extracting Paperless API token for admin"
 PAPERLESS_TOKEN="$(sg docker -c "bash ${REPO_ROOT}/scripts/get_paperless_token.sh" 2>/dev/null | tr -d '\r' | tail -n 1)"
@@ -209,19 +209,17 @@ if [[ -n "$PAPERLESS_TOKEN" ]]; then
     echo "  (re-extract anytime with: bash scripts/get_paperless_token.sh)"
     echo
     if (( ! SKIP_PEERS )); then
-        echo "Run Elnath's production-traffic generator (optional):"
+        echo "Run production-traffic generator:"
         echo "  bash scripts/run_data_generator.sh --rate 2.0 --duration 300"
         echo "  (wraps token extraction + image build + docker run)"
         echo
     fi
 fi
-echo "Next steps (all optional, independently runnable):"
+echo "Next steps:"
 echo "  bash scripts/seed_demo.sh --trigger-alert    # populate counters + fire/resolve alert"
 echo "  bash scripts/run_data_generator.sh           # real synthetic traffic via Elnath's generator"
 echo "  bash scripts/verify_integration.sh           # 13-checkpoint integration test"
 echo "  bash scripts/deploy_model.sh                 # MLflow → MinIO → ml-gateway reload"
-echo
-echo "Path A end-to-end HTR round-trip — see docs/DEPLOYMENT.md §5."
 echo
 echo "Teardown:"
 echo "  docker compose -f docker-compose.yml -f docker-compose.shared.yml down"

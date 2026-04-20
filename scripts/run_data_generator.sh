@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# run_data_generator.sh — one-command wrapper around Elnath's data_generator
+# run_data_generator.sh — one-command wrapper around data_generator
 # (REDES01/paperless_data/data_generator).
 #
 # Handles token extraction, image build (if missing), and the docker run

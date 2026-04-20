@@ -3,9 +3,8 @@
 # get_paperless_token.sh — extract (or create) the Paperless DRF API token
 # for the `admin` user. Idempotent: reuses the existing token if one exists.
 #
-# Required by Elnath's data_generator (REDES01/paperless_data/data_generator/),
-# which authenticates with `Authorization: Token <key>`. Basic auth works for
-# our own seed_demo.sh but not for the production-traffic generator.
+# Required by data_generator (REDES01/paperless_data/data_generator/),
+# which authenticates with `Authorization: Token <key>`.
 #
 # Usage:
 #   export PAPERLESS_TOKEN=$(bash scripts/get_paperless_token.sh)

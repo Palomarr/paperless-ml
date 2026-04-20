@@ -18,9 +18,9 @@
 #
 # Requires:
 #   - docker compose stack up (mlflow service healthy)
-#   - at least one model registered in MLflow under MODEL_NAME (see below)
+#   - at least one model registered in MLflow under MODEL_NAME
 #
-# Registering a model from training code (for reference):
+# Registering a model from training code:
 #   import mlflow
 #   with mlflow.start_run() as run:
 #       ...train...
@@ -29,24 +29,11 @@
 #       if cer < 0.15:
 #           mlflow.register_model(f"runs:/{run.info.run_id}/model", "paperless-htr")
 #
-# NOTES / deferred work:
-#   * ml-gateway does not yet expose POST /admin/reload-model. For the Phase 2
-#     demo we use `docker compose restart ml-gateway` to force weight reload,
-#     which takes ~90 seconds (TrOCR + mpnet warm-up). Adding a dynamic reload
-#     endpoint that atomically swaps ONNX weights without restart is tracked
-#     as a follow-up — blocks on the actual on-disk model layout ml-gateway
-#     uses. For Phase 2 the mechanism is demonstrable end-to-end.
-#   * serving/src/export/export_onnx.py exports the pre-trained base models
-#     (microsoft/trocr-small-handwritten, sentence-transformers/all-mpnet-base-v2)
-#     from HuggingFace. If training registers a fine-tuned .pth state_dict,
-#     the export step below needs a task-specific converter. For the current
-#     demo we assume the registered artifact is already ONNX (or MLflow's
-#     `mlflow.onnx.log_model` was used), and passthrough-copy.
 # ============================================================================
 
 set -euo pipefail
 
-# ---------- config (all env-overridable) ----------
+# ---------- config ----------
 MODEL_NAME="${MODEL_NAME:-paperless-htr}"
 WAREHOUSE_BUCKET="${WAREHOUSE_BUCKET:-paperless-datalake}"
 DRY_RUN=0

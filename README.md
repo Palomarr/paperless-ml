@@ -1,138 +1,132 @@
-# Paperless-ngx ML — Project 02
+# Paperless-ngx ML — System Implementation
 
-*Project ID: proj02*
-## Overview
+Two complementary machine-learning features integrated into [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx), an open-source document management system, deployed end-to-end on Chameleon Cloud for a hypothetical 30-staff academic department.
 
-This project adds two complementary ML features to [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx), an open-source document management system, deployed on Chameleon Cloud for a hypothetical 30-staff academic department:
+- **Handwritten Text Recognition (HTR)** — TrOCR transcribes handwritten regions at upload time. Transcriptions merge with Tesseract OCR so handwritten content is indexed alongside typed text. Low-confidence regions surface to the user via a feedback UI; corrections flow back as labeled training data.
+- **Semantic Search** — an mpnet bi-encoder (768-dim) encodes documents and queries into a shared embedding space; results from a Qdrant vector index are merged with Paperless's keyword index and ranked for the user.
 
-1. **Handwritten Text Recognition (HTR)** — TrOCR-small-handwritten transcribes handwritten regions at upload time. Results merge with Tesseract OCR output so handwritten content becomes searchable. Low-confidence transcriptions are flagged for user correction, which feeds back as labeled training data.
+---
 
-2. **Semantic Search** — An all-mpnet-base-v2 bi-encoder (768-dim) encodes documents and queries into a shared embedding space. At query time, the user's search string is encoded and matched against a Qdrant vector index for top-k nearest-neighbor retrieval.
+## Repositories
 
+All four repositories are public.
 
-## Repository structure
+| Repo | Role | What it owns |
+|---|---|---|
+| [Palomarr/paperless-ml](https://github.com/Palomarr/paperless-ml) (this repo) | Serving + Integration | `ml-gateway` FastAPI + ONNX Runtime inference, `ml_hooks` Django overlay, Prometheus/Alertmanager/Grafana observability, `rollback-ctrl`, `pipeline-scheduler`, one-command Chameleon bring-up |
+| [REDES01/paperless_data](https://github.com/REDES01/paperless_data) | Data — Elnath | IAM + SQuAD ingestion, postgres schema, batch training-set compilation with quality checks, synthetic traffic generator |
+| [REDES01/paperless_data_integration](https://github.com/REDES01/paperless_data_integration) | Data — Elnath | HTR consumer (Kafka → region slicer → ml-gateway → postgres), live drift monitor |
+| [gdtmax/paperless_training_integration](https://github.com/gdtmax/paperless_training_integration) | Training — Dongting | Training pipeline (train / eval / quality gate), ONNX export, MLflow integration |
 
-```
-├── contracts/                  # Agreed JSON input/output pairs
-│   ├── htr_input.json
-│   ├── htr_output.json
-│   ├── search_input.json
-│   └── search_output.json
-├── serving/                    # Serving role (Yikai)
-│   ├── dockerfiles/
-│   │   ├── Dockerfile.fastapi          # Baseline: FastAPI + PyTorch
-│   │   ├── Dockerfile.fastapi-ort      # FastAPI + ONNX Runtime
-│   │   └── Dockerfile.dev              # Dev container for exports
-│   ├── src/
-│   │   ├── fastapi_app/
-│   │   │   ├── app.py                  # PyTorch serving app
-│   │   │   ├── app_ort.py              # ONNX Runtime serving app
-│   │   │   └── s3_utils.py             # MinIO image download helper
-│   │   └── export/
-│   │       ├── export_onnx.py          # Export both models to ONNX
-│   │       └── quantize_onnx.py        # Dynamic quantization (INT8)
-│   ├── triton_model_repo/
-│   │   ├── htr_model/config.pbtxt
-│   │   └── search_model/config.pbtxt
-│   ├── benchmarks/
-│   │   ├── benchmark_fastapi.py        # Async load test for FastAPI endpoints
-│   │   ├── benchmark_triton.sh         # perf_analyzer wrapper for Triton
-│   │   ├── baseline_pytorch_cpu.json   # Baseline results (CPU)
-│   │   ├── baseline_pytorch_gpu.json   # Baseline results (GPU)
-│   │   ├── serving_options.csv         # Summary table of all configurations
-│   │   └── triton_notes.md             # Triton design decisions
-│   ├── scripts/
-│   │   ├── test_contract.py            # Contract validation
-│   │   └── upload_test_image.py        # Upload test image to MinIO
-│   ├── docker-compose-fastapi.yaml     # Row 1: PyTorch baseline
-│   ├── docker-compose-ort.yaml         # Rows 2, 4: ORT FP32
-│   ├── docker-compose-ort-quant.yaml   # Row 3: ORT quantized GPU
-│   ├── docker-compose-ort-quant-cpu.yaml # Row 5: ORT quantized CPU
-│   ├── docker-compose-triton.yaml      # Rows 6–9: Triton
-│   ├── setup_serving.sh                # One-command setup from scratch
-│   ├── demo_fastapi.sh                 # Demo recording: contract segment
-│   └── demo_triton.sh                  # Demo recording: Triton segment
-├── training/                   # Training role
-├── data/                       # Data role
-└── README.md                   # This file
+---
+
+## Quick start (Chameleon CHI@TACC)
+
+```bash
+# 1. Provision a `gpu_p100` bare-metal node
+
+# 2. SSH into the node
+ssh -i ~/.ssh/id_rsa_chameleon cc@<floating-ip>
+
+# 3. One command brings up the full 18-service stack
+cd ~/paperless-ml
+bash scripts/chameleon_setup.sh
 ```
 
-## Contracts
+The script installs host prerequisites, clones the three peer repos as siblings, brings up the compose stack, waits for services to be healthy, extracts the Paperless admin API token, and prints service URLs.
 
-The `contracts/` directory contains one JSON input/output pair per model, agreed upon by all three roles. These define the interface between serving, training, and data pipelines:
+Takes **~8–12 minutes** on a cold node.
 
-- **HTR:** Input is a document region (image via S3 URL or base64). Output is transcribed text with a confidence score and a flag for low-confidence results.
-- **Search:** Input is a query string with session metadata. Output is ranked document chunks with similarity scores.
+**After the script prints its summary**, URLs to open from your laptop:
 
-## Serving
+| Service | URL | Auth |
+|---|---|---|
+| Paperless web + Feedback UI | `http://<ip>:8000` + `/ml-ui/` | admin / admin |
+| Grafana dashboards | `http://<ip>:3000` | admin / admin |
+| Prometheus alerts | `http://<ip>:9090/alerts` | — |
+| Alertmanager | `http://<ip>:9093` | — |
+| Qdrant dashboard | `http://<ip>:6333/dashboard` | — |
+| MinIO console | `http://<ip>:9001` | minioadmin / minioadmin |
+| MLflow UI | `http://<ip>:5050` | — |
 
-### Models served
+Full deployment + troubleshooting guide: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-| Model | Purpose | Input | Output | Latency target |
-|-------|---------|-------|--------|----------------|
-| TrOCR-small-handwritten (encoder) | HTR | Cropped handwriting image (3×384×384) | Encoder hidden states → decoded text | < 5s per page (async) |
-| all-mpnet-base-v2 | Semantic search | Query text (tokenized, max 128) | 768-dim embedding → top-k results | < 1s (interactive) |
+---
 
-### Serving configurations evaluated
+## Architecture
 
-Nine configurations were benchmarked across three optimization levels, producing the serving options table. (Note: early benchmark rows used all-MiniLM-L6-v2; the production model was later upgraded to all-mpnet-base-v2. Latency characteristics are similar as both are SBERT models of comparable size.)
+Eight tiers, one compose file:
 
-- **Baseline** (Row 1): FastAPI + PyTorch on GPU. HTR 185ms, Search 20ms.
-- **Model-level** (Rows 2–3): ONNX Runtime with FP32 and dynamic quantization. ORT improved HTR by 20%; quantization hurt on GPU due to dequant overhead.
-- **Infrastructure-level** (Rows 4–5): CPU-only execution. Sufficient for production load (150 HTR + 50 search requests/day). Marked as cost-priority best option.
-- **System-level** (Rows 6–8): Triton Inference Server with ONNX backend. Eliminated Python/FastAPI overhead — HTR latency dropped from 185ms to 17ms (10×), search from 20ms to 7ms. Dynamic batching pushed throughput to 103 rps (HTR) and 198 rps (search with 2 GPU instances).
-- **Combined** (Row 9): Quantized ONNX on Triton GPU. Catastrophically worse — dynamic quantization targets CPU ops and forces dequant/requant overhead on GPU. Documented as a negative result.
+- **User-facing** — Paperless-ngx + `ml_hooks` Django overlay. The overlay is bind-mounted into the Paperless container so no fork is needed; it adds the `MlGlobalSearchView`, the `Feedback` model, the feedback UI at `/ml-ui/`, and the four Redpanda event publishers.
+- **ML serving** — `ml-gateway` (FastAPI + ONNX Runtime) exposes `/htr`, `/search/encode`, `/search/query`, `/metrics`, `/health`. Models pulled from MinIO on boot.
+- **Storage** — Postgres (Paperless's DB + Feedback table), Redis (Celery broker), Qdrant (768-dim vector index), MinIO (document images + model artifacts + training-data warehouse), Redpanda (Kafka-compatible event stream for uploads / corrections / queries / feedback).
+- **Monitoring** — Prometheus scrapes six targets and loads eight alert rules across two groups. Grafana auto-provisions a nine-panel dashboard. Alertmanager routes alerts to `rollback-ctrl`.
+- **Training** — MLflow tracking server with Postgres backend and MinIO artifact store. Dongting's pipeline logs all runs and registers models conditionally via the quality gate.
+- **Automated pipeline** — `pipeline-scheduler` auto-triggers retraining when two compound conditions hold (≥500 new corrections AND ≥24h since last run). On gate pass, the scheduler promotes the new version via MLflow alias and restarts `ml-gateway`. On gate fail, per-reason counters are emitted to Prometheus so silent-failure weeks are observable.
+- **Safeguarding** — `rollback-ctrl` executes automated rollback on sustained quality or drift alerts: swaps the `@production` MLflow alias back one version and restarts `ml-gateway` via the Docker API. Per-alertname cooldown handles Alertmanager retry dedup; defensive version floor refuses to swap below v1.
+- **Data quality** — Elnath's three checkpoints: post-ingestion validation, training-set quality checks with rejection logs, and live drift monitor fed from the HTR consumer.
 
-### Best options by priority
+---
 
-- **Latency:** Triton ONNX baseline (Row 6) — HTR 17ms, Search 7ms
-- **Throughput:** Triton + dynamic batching (Row 7 for HTR at 103 rps; Row 8 for Search at 198 rps)
-- **Cost:** ORT FP32 on CPU (Row 4) — handles production load without GPU
+## Key design documents
 
-### Right-sizing
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — node provisioning, one-command bring-up, teardown, Path A cross-stack bring-up
+- [`docs/SAFEGUARDING.md`](docs/SAFEGUARDING.md) — six-pillar safeguarding plan with concrete enforcement-mechanism citations per pillar
 
-Under sustained Poisson load on the best throughput config (Triton + batching + multi-instance):
+---
 
-| Resource | HTR load | Search load |
-|----------|----------|-------------|
-| GPU 0 utilization | ~85% | ~76% |
-| GPU 0 memory | 1.7 / 16 GB | 1.7 / 16 GB |
-| GPU 1 | Idle | Idle |
-| CPU | ~120% | ~116% |
-| RAM | 2 / 126 GB | 2 / 126 GB |
+## Team
 
-Single P100 is sufficient. Second P100 and 89% of GPU memory are unused. A smaller GPU (T4, RTX4000) would likely handle production traffic.
+Three-person team.
 
-### Reproducing from scratch
+| Member | Role | Primary ownership |
+|---|---|---|
+| Yikai Sun | Serving | `ml-gateway`, `ml_hooks` overlay, Prometheus + Grafana monitoring, rollback controller, pipeline scheduler, one-command bring-up, feedback UI |
+| Dongting Gao | Training | Model training pipeline, evaluation, quality gates, MLflow integration, ONNX export, retraining runs against gate thresholds |
+| Elnath Zhao | Data | Data ingestion (IAM, SQuAD), postgres schema, HTR consumer, region slicer, batch training-set compilation with quality checks, live drift monitor, synthetic data generator |
 
-See `serving/README.md` for full instructions. The shortest path:
-
-1. Run `provision.ipynb` from the Chameleon Jupyter environment (provisions node, installs Docker + NVIDIA toolkit, clones repo).
-2. SSH in and run `cd ~/paperless-ml/serving && bash setup_serving.sh`.
-3. Both FastAPI and Triton stacks are tested and ready in ~30 minutes.
-
-## Infrastructure
-
-All compute runs on [Chameleon Cloud](https://chameleoncloud.org/) at CHI@TACC.
-
-| Resource | Type | Purpose |
-|----------|------|---------|
-| GPU node | `gpu_p100` bare metal (2× P100, 48 vCPU, 126 GB) | Model serving and benchmarking |
-| OS image | CC-Ubuntu24.04-CUDA | Base image with NVIDIA drivers |
-| Triton | nvcr.io/nvidia/tritonserver:24.01-py3 | System-level serving |
-| FastAPI base | nvidia/cuda:11.8.0-runtime-ubuntu22.04 | Model-level serving |
-
-
-## Branching workflow
-
-- `main` — stable shared structure; merge here when features are ready
-- `serving` — Yikai's working branch for API endpoints, Dockerfiles, Triton configs, benchmarking
-- `training-dev` — Dongting's working branch
-- `data-pipeline` — Elnath's working branch
+---
 
 ## External datasets
 
 | Dataset | Purpose | License |
-|---------|---------|---------|
-| [IAM Handwriting Database](https://fki.tic.heia-fr.ch/databases/iam-handwriting-database) | HTR pretraining/fine-tuning | Non-commercial research only |
-| [SQuAD 2.0](https://rajpurkar.github.io/SQuAD-explorer/) | Retrieval model pretraining | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+|---|---|---|
+| [IAM Handwriting Database](https://fki.tic.heia-fr.ch/databases/iam-handwriting-database) | HTR pretraining + fine-tuning | Non-commercial research only |
+| [SQuAD 2.0](https://rajpurkar.github.io/SQuAD-explorer/) | Bi-encoder pretraining + retrieval evaluation | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+
+Both datasets are ingested via Elnath's batch pipeline into our MinIO warehouse at `s3://paperless-datalake/warehouse/iam_dataset/` and `s3://paperless-datalake/warehouse/squad_dataset/`. Lineage (source URL, ingestion timestamp, row counts, validator output) is captured on every ingest.
+
+---
+
+## Optional: exercise the system after bring-up
+
+```bash
+# Populate realistic synthetic traffic (uploads, searches, corrections, feedback)
+# against the live Paperless REST API. Token-authenticated via Elnath's generator.
+bash scripts/run_data_generator.sh --rate 2.0 --duration 120
+
+# Run the 13-checkpoint end-to-end integration test
+bash scripts/verify_integration.sh
+
+# Demo the retrain → evaluate → quality gate → promote cycle
+docker compose exec pipeline-scheduler python force_tick.py
+
+# Observe the automated rollback chain firing (alert → webhook → alias swap → restart)
+bash scripts/seed_demo.sh --trigger-alert
+```
+
+---
+
+## Reproducing from scratch
+
+100% of project materials are in Git. To reproduce the full system on a fresh Chameleon `gpu_p100` node:
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/Palomarr/paperless-ml.git
+   cd paperless-ml
+   ```
+2. Running `bash scripts/chameleon_setup.sh` from this repo to clone the three peer repos, install prerequisites, and bring up the full stack.
+3. Following the optional exercise steps above to verify feedback capture, retraining, and rollback end-to-end
+
+All service credentials are development defaults baked into `docker-compose.yml` with inline comments flagging them as dev-only.
