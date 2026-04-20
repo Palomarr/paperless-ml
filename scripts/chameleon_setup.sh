@@ -109,7 +109,16 @@ else
     clone_if_missing() {
         local url="$1" dst="$2"
         if [[ -d "$dst/.git" ]]; then
-            ok "$(basename "$dst") already cloned"
+            # Pull latest main so re-runs pick up teammates' pushes. Uses
+            # --ff-only to refuse if the local clone has diverged (dirty
+            # working tree, detached HEAD, etc.) — in that case we warn
+            # and continue with the existing clone rather than kill the
+            # whole setup.
+            if (cd "$dst" && git pull --ff-only) >/dev/null 2>&1; then
+                ok "$(basename "$dst") updated to latest main"
+            else
+                warn "$(basename "$dst") pull failed (local changes or network?); using existing clone"
+            fi
         else
             git clone --depth=50 "$url" "$dst"
             ok "Cloned $(basename "$dst")"
