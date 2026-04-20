@@ -129,8 +129,10 @@ else
                      "${PROJECT_PARENT}/paperless_data"
     clone_if_missing "https://github.com/REDES01/paperless_data_integration.git" \
                      "${PROJECT_PARENT}/paperless_data_integration"
+    clone_if_missing "https://github.com/gdtmax/paperless_training_integration.git" \
+                     "${PROJECT_PARENT}/paperless_training_integration"
 
-    ok "Peer repos on plain main (D1 + D3 merged upstream). Path A works end-to-end."
+    ok "Peer repos cloned: paperless_data + paperless_data_integration (Elnath), paperless_training_integration (Dongting)"
 fi
 
 # ===========================================================================
