@@ -1,0 +1,24 @@
+models:
+  htr:
+    gate:
+      enabled: true
+      fail_on_missing_metrics: true
+      required_metrics:
+        - loss
+        - accuracy
+      thresholds:
+        max_loss: 5.0
+        min_accuracy: 0.6   # ✅ 真实判断标准
+
+  retrieval:
+    gate:
+      enabled: true
+      fail_on_missing_metrics: true
+      required_metrics:
+        - loss
+        - recall_at_k
+        - embedding_dim_check
+      thresholds:
+        max_loss: 5.0
+        min_recall_at_k: 0.5   # ✅ 核心指标
+        expected_embedding_dim: 128

@@ -1,0 +1,11 @@
+{
+    "htr": {
+        "loss": 1.5614795684814453,
+        "accuracy": 1.0
+    },
+    "retrieval": {
+        "loss": 4.720985412597656,
+        "recall_at_k": 1.0,
+        "embedding_dim_check": 1
+    }
+}

@@ -1,0 +1,22 @@
+
+name: "htr"
+platform: "onnxruntime_onnx"
+max_batch_size: 32
+
+input [
+  {
+    name: "input"
+    data_type: TYPE_FLOAT32
+    dims: [1, 28, 28]
+  }
+]
+
+output [
+  {
+    name: "logits"
+    data_type: TYPE_FLOAT32
+    dims: [10]
+  }
+]
+
+dynamic_batching {}

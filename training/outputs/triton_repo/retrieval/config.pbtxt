@@ -1,0 +1,22 @@
+
+name: "retrieval"
+platform: "onnxruntime_onnx"
+max_batch_size: 32
+
+input [
+  {
+    name: "input_ids"
+    data_type: TYPE_INT64
+    dims: [128]
+  }
+]
+
+output [
+  {
+    name: "embedding"
+    data_type: TYPE_FLOAT32
+    dims: [128]
+  }
+]
+
+dynamic_batching {}

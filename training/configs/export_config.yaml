@@ -1,0 +1,26 @@
+models:
+  htr:
+    format: onnx
+    source_checkpoint: outputs/checkpoints/htr_baseline.pt
+    export_path: outputs/exported/htr_model.onnx
+    input:
+      name: input
+      shape: [1, 1, 28, 28]
+      dtype: float32
+    output:
+      name: logits
+      shape: [1, 10]
+      dtype: float32
+
+  retrieval:
+    format: onnx
+    source_checkpoint: outputs/checkpoints/retrieval_baseline.pt
+    export_path: outputs/exported/retrieval_model.onnx
+    input:
+      name: input_ids
+      shape: [1, 128]
+      dtype: int64
+    output:
+      name: embedding
+      shape: [1, 128]
+      dtype: float32

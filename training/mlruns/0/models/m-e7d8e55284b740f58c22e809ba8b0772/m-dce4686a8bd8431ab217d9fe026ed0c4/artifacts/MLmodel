@@ -1,0 +1,23 @@
+artifact_path: /work/paperless_training/mlruns/0/models/m-dce4686a8bd8431ab217d9fe026ed0c4/artifacts
+flavors:
+  python_function:
+    config:
+      device: null
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pytorch
+    pickle_module_name: mlflow.pytorch.pickle_module
+    python_version: 3.12.10
+  pytorch:
+    code: null
+    model_data: data
+    pytorch_version: 2.11.0+cu130
+mlflow_version: 3.10.1
+model_id: m-dce4686a8bd8431ab217d9fe026ed0c4
+model_size_bytes: 410853
+model_uuid: m-dce4686a8bd8431ab217d9fe026ed0c4
+prompts: null
+run_id: 827a5133fefb4230abe42418156dc1cc
+utc_time_created: '2026-04-06 14:39:43.576402'

@@ -1,0 +1,30 @@
+[
+  {
+    "model": "htr",
+    "checkpoint": "outputs/checkpoints/htr_baseline.pt",
+    "export_path": "outputs/exported/htr_model.onnx",
+    "input_shape": [
+      1,
+      1,
+      28,
+      28
+    ],
+    "output_shape": [
+      1,
+      10
+    ]
+  },
+  {
+    "model": "retrieval",
+    "checkpoint": "outputs/checkpoints/retrieval_baseline.pt",
+    "export_path": "outputs/exported/retrieval_model.onnx",
+    "input_shape": [
+      1,
+      128
+    ],
+    "output_shape": [
+      1,
+      128
+    ]
+  }
+]

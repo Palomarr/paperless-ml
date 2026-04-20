@@ -1,0 +1,38 @@
+models:
+  htr:
+    data:
+      path: data/htr_input_sample.json
+    experiments:
+      - name: htr_baseline
+        batch_size: 16
+        epochs: 3
+        learning_rate: 0.001
+
+      - name: htr_low_lr
+        batch_size: 16
+        epochs: 3
+        learning_rate: 0.0001
+
+      - name: htr_large_batch
+        batch_size: 32
+        epochs: 3
+        learning_rate: 0.001
+
+  retrieval:
+    data:
+      path: data/retrieval_input_sample.json
+    experiments:
+      - name: retrieval_baseline
+        batch_size: 16
+        epochs: 3
+        learning_rate: 0.001
+
+      - name: retrieval_low_lr
+        batch_size: 16
+        epochs: 3
+        learning_rate: 0.0001
+
+      - name: retrieval_large_batch
+        batch_size: 32
+        epochs: 3
+        learning_rate: 0.001

@@ -1,0 +1,11 @@
+torch
+torchvision
+torchaudio
+mlflow==2.17.2
+PyYAML
+numpy
+onnx
+onnxruntime
+pandas
+scikit-learn
+tqdm

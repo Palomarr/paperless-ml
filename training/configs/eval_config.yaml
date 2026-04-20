@@ -1,0 +1,19 @@
+models:
+  htr:
+    data:
+      path: data/htr_input_sample.json
+    evaluation:
+      batch_size: 16
+      metrics:
+        - loss
+        - accuracy   # ✅ 加一个真实指标
+
+  retrieval:
+    data:
+      path: data/retrieval_input_sample.json
+    evaluation:
+      batch_size: 16
+      metrics:
+        - loss
+        - recall_at_k     # ✅ retrieval核心指标
+        - embedding_dim_check
