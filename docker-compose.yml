@@ -63,15 +63,31 @@ services:
       timeout: 3s
       retries: 10
 
-  # Rollback controller: stub today (logs webhook payloads). Will swap the
-  # Triton model repo symlink + signal reload once Triton is the serving
-  # backend (see N9 in docs/HANDOFF.md).
+  # Rollback controller: receives Alertmanager webhooks and executes real
+  # rollback when alerts labeled `rollback_trigger: "true"` fire. Moves
+  # the `@production` alias on MLflow back one version + restarts
+  # ml-gateway via the mounted Docker socket. See ops/rollback-ctrl/app.py
+  # for idempotency + security-note docs.
   rollback-ctrl:
     build:
       context: ./ops/rollback-ctrl
     restart: unless-stopped
     expose:
       - "8000"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      ROLLBACK_MODEL_NAME: paperless-htr
+      ROLLBACK_ALIAS: production
+      ML_GATEWAY_CONTAINER: paperless-ml-ml-gateway-1
+      ROLLBACK_COOLDOWN_SECONDS: "300"
+    volumes:
+      # Needed to restart ml-gateway after alias swap. See security-note
+      # in ops/rollback-ctrl/app.py — course-project tradeoff; production
+      # would use a ServiceAccount with scoped RBAC instead.
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
       interval: 10s
