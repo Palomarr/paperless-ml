@@ -150,6 +150,13 @@ def _ml_global_search_view():
                                 response.data.get("documents", []),
                             ) + list(serialized)
                             response.data["ml_semantic_added"] = len(new_docs)
+                            # Bump `total` so the Paperless UI renders the
+                            # merged count. Paperless's GlobalSearchView sets
+                            # `total` from keyword matches only; without this
+                            # update, a query that matched 0 keyword docs but
+                            # added N semantic docs would show "0 results" in
+                            # the UI even though `documents` has N items.
+                            response.data["total"] = len(response.data["documents"])
                             log.info(
                                 "ml_global_search: query=%r added %d semantic docs",
                                 query,
