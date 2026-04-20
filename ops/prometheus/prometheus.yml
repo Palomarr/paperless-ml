@@ -41,3 +41,16 @@ scrape_configs:
       - targets: ["redpanda:9644"]
         labels:
           service: redpanda
+
+  # Elnath's drift monitor (REDES01/paperless_data_integration @ ecbcd51).
+  # Runs in its own compose stack on paperless_ml_net; bring-up docs:
+  # REDES01/paperless_data_integration/drift_monitor/README.md.
+  # Scrape fails silently when the monitor isn't running (e.g. our-stack-only
+  # dev), so this is safe to land before the service is up.
+  - job_name: drift-monitor
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["drift_monitor:8000"]
+        labels:
+          service: drift-monitor
+          role: data

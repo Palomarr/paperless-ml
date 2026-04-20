@@ -97,3 +97,22 @@ groups:
         annotations:
           summary: "Search CTR < 15% on semantic results"
           description: "See architecture.html:977 — baseline ~35%; below 15% for 2h means users are better served by keyword-only."
+
+  # ── Input drift (Elnath's drift_monitor, REDES01/paperless_data_integration) ──
+  # MMD-based online drift detection fit on 500 IAM training crops. Threshold
+  # and hold-for values per drift_monitor/README.md §"Thresholds". Routes
+  # through the same Alertmanager → rollback-ctrl chain as availability alerts
+  # since the action label is "rollback".
+  - name: htr-drift
+    interval: 30s
+    rules:
+      - alert: HtrInputDrift
+        expr: rate(drift_events_total[5m]) > 0.2
+        for: 2m
+        labels:
+          severity: critical
+          role: data
+          rollback_trigger: "true"
+        annotations:
+          summary: "HTR input distribution has drifted"
+          description: "Sustained MMD drift events > 0.2/s over last 5m. Upload distribution has shifted far enough from the IAM training reference that model outputs are likely degraded. Triggers rollback to prior HTR model version."

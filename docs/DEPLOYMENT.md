@@ -84,6 +84,22 @@ sg docker -c 'make up'
 # Elnath's HTR consumer
 cd ~/paperless_data_integration/htr_consumer
 sg docker -c 'docker compose up -d'
+
+# Elnath's drift monitor (Point 3 data-quality deliverable).
+# Fit-once prerequisite on the data-role machine (one-shot, writes reference
+# to our MinIO at s3://paperless-datalake/warehouse/drift_reference/htr_v1/cd):
+#   cd ~/paperless_data
+#   MINIO_ENDPOINT=<host>:9000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin \
+#     python scripts/build_drift_reference.py
+#
+# Then on the VM:
+cd ~/paperless_data_integration
+sg docker -c 'docker compose -f drift_monitor/compose.yml up -d --build'
+
+# The drift monitor's /metrics is already in our Prometheus scrape config
+# (ops/prometheus/prometheus.yml, job_name=drift-monitor). The HtrInputDrift
+# alert (ops/prometheus/alerts.yml) fires through our existing Alertmanager
+# → rollback-ctrl chain on sustained drift.
 ```
 
 Verify with a Paperless upload — see `docs/HANDOFF.md` §1 proof-of-working
