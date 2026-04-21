@@ -23,6 +23,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Self-wrap with `sg docker` if we can't talk to the Docker daemon directly.
+# On fresh Chameleon nodes the `cc` user is in the docker group per
+# /etc/group, but the current shell's effective groups don't include it
+# until a new login (or `newgrp docker`). Detect + re-exec rather than
+# require callers to know the difference.
+if ! docker version >/dev/null 2>&1; then
+    if getent group docker >/dev/null 2>&1 && command -v sg >/dev/null 2>&1; then
+        exec sg docker -c "bash $0 $*"
+    else
+        echo "ERROR: docker not accessible and can't sg-wrap (missing 'docker' group or 'sg' command)" >&2
+        exit 1
+    fi
+fi
+
 # Paperless-web's admin user is created by PAPERLESS_ADMIN_USER env on first
 # boot, but the DB must be migrated first. Wait up to 120s.
 ATTEMPTS=0

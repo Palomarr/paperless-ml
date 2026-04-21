@@ -61,7 +61,9 @@ step() { printf "%s   ∙%s %s\n" "$C_DIM" "$C_RESET" "$*"; }
 fail() { printf "%s  ✗%s %s\n" "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
 CURRENT_STEP=""
-trap '[[ -n "$CURRENT_STEP" ]] && fail "FAILED at step: $CURRENT_STEP (exit $?)"' ERR
+# Capture $? FIRST before running any test — otherwise [[ ]] clobbers it and
+# the error message reports "(exit 0)" regardless of actual failure code.
+trap 'rc=$?; [[ -n "$CURRENT_STEP" ]] && fail "FAILED at step: $CURRENT_STEP (exit $rc)"' ERR
 set -e
 
 # ── Preflight ───────────────────────────────────
@@ -91,8 +93,27 @@ else
     goto_seed=0
 fi
 
-# ── 1. Build training + data-generator images ───
+# ── 0. Pre-build source patches for upstream bugs ───
 if (( goto_seed == 0 )); then
+log "[0/12] Pre-build source patches for upstream bugs"
+CURRENT_STEP="pre-build patches"
+
+# Dongting's training repo hardcodes http://127.0.0.1:5000 for MLflow in
+# trainer/mlflow_helper.py, eval.py, quality_gate.py. Our pipeline-scheduler
+# passes MLFLOW_TRACKING_URI=http://mlflow:5000 but the code ignores the
+# env. Patch all three files in place so the image we build picks up the
+# compose-network hostname. Upstream fix is in Yikai's PR #1 on
+# gdtmax/paperless_training_integration — remove this block once merged.
+TRAIN_HARDCODED=$(grep -rl 'http://127.0.0.1:5000' "$TRAIN_REPO" --include='*.py' 2>/dev/null || true)
+if [[ -n "$TRAIN_HARDCODED" ]]; then
+    # shellcheck disable=SC2086
+    sed -i 's|http://127.0.0.1:5000|http://mlflow:5000|g' $TRAIN_HARDCODED
+    ok "patched $(echo "$TRAIN_HARDCODED" | wc -l) training-repo files (upstream PR gdtmax#1)"
+else
+    ok "training repo already uses http://mlflow:5000 (Dongting merged PR #1)"
+fi
+
+# ── 1. Build training + data-generator images ───
 log "[1/12] Build training + data-generator images (parallel)"
 CURRENT_STEP="build training/data-generator images"
 
@@ -323,6 +344,95 @@ PY
 "
 ok "MLflow seeded"
 
+# ── 11a. Extract an IAM crop as a handwritten fixture for bullet 2 ──
+# Elnath's data_generator/fixtures/ directory doesn't exist anymore (his
+# refactor pulls fixtures from MinIO at runtime). Pull one real IAM line
+# image out of the parquet we just ingested and stage it at
+# /tmp/handwritten_sample.png so step 12 can pre-upload it.
+log "[11a/12] Stage IAM handwritten fixture for bullet 2 pre-upload"
+CURRENT_STEP="extract IAM fixture"
+
+FIXTURE_PATH="/tmp/handwritten_sample.png"
+if [[ -f "$FIXTURE_PATH" && -s "$FIXTURE_PATH" ]]; then
+    ok "fixture already staged at $FIXTURE_PATH"
+else
+    sg docker -c "docker run --rm --network $NETWORK \
+      -v /tmp:/out \
+      -e MINIO_ENDPOINT=minio:9000 \
+      -e MINIO_ACCESS_KEY=minioadmin \
+      -e MINIO_SECRET_KEY=minioadmin \
+      -w /app --entrypoint sh paperless-batch -c '
+pip install --quiet Pillow==11.0.0 > /dev/null 2>&1
+python - <<PY
+import io, pyarrow.parquet as pq
+from minio import Minio
+mc = Minio(\"minio:9000\", access_key=\"minioadmin\", secret_key=\"minioadmin\", secure=False)
+shards = [o.object_name for o in mc.list_objects(\"paperless-datalake\",
+    prefix=\"warehouse/iam_dataset/train/\", recursive=True)
+    if o.object_name.endswith(\".parquet\")]
+if not shards:
+    raise SystemExit(\"no IAM shards under warehouse/iam_dataset/train/\")
+resp = mc.get_object(\"paperless-datalake\", shards[0])
+try:
+    data = resp.read()
+finally:
+    resp.close(); resp.release_conn()
+first_png = pq.read_table(io.BytesIO(data)).column(\"image_png\").to_pylist()[0]
+with open(\"/out/handwritten_sample.png\", \"wb\") as f:
+    f.write(first_png)
+print(f\"saved /out/handwritten_sample.png ({len(first_png)} bytes) from {shards[0]}\")
+PY'" > /dev/null 2>&1
+    [[ -f "$FIXTURE_PATH" && -s "$FIXTURE_PATH" ]] \
+        || fail "IAM fixture extraction produced no output at $FIXTURE_PATH"
+    ok "IAM fixture staged at $FIXTURE_PATH ($(stat -c%s "$FIXTURE_PATH") bytes)"
+fi
+
+# ── 11b. Ensure OOD samples exist in MinIO for bullet 7c drift demo ──
+# Previous demo uploads are gone on fresh nodes. Generate 5 typed-text
+# PNGs (64×512 matches the drift_monitor crop size) and upload to
+# s3://paperless-images/ood/ so bullet 7c's injection loop has payloads.
+log "[11b/12] Ensure OOD samples staged in MinIO"
+CURRENT_STEP="OOD samples synthesis"
+
+OOD_COUNT=$(sg docker -c "docker compose exec -T minio mc ls local/paperless-images/ood/" 2>/dev/null \
+    | grep -c '\.png' || true)
+if (( OOD_COUNT >= 3 )); then
+    ok "OOD samples present: $OOD_COUNT objects"
+else
+    sg docker -c "docker run --rm --network $NETWORK \
+      -e MINIO_ENDPOINT=minio:9000 \
+      -e MINIO_ACCESS_KEY=minioadmin \
+      -e MINIO_SECRET_KEY=minioadmin \
+      -w /app --entrypoint sh paperless-batch -c '
+pip install --quiet Pillow==11.0.0 > /dev/null 2>&1
+python - <<PY
+import io
+from PIL import Image, ImageDraw
+from minio import Minio
+mc = Minio(\"minio:9000\", access_key=\"minioadmin\", secret_key=\"minioadmin\", secure=False)
+lines = [
+    \"Invoice #2041 — total \$1,240.50\",
+    \"Meeting notes: Q2 OKRs review\",
+    \"Received: 12 packages checked in\",
+    \"Deploy ticket #8817 — platform team\",
+    \"System error — 404 on /api/legacy\",
+]
+for i, text in enumerate(lines):
+    img = Image.new(\"L\", (512, 64), color=255)
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 22), text, fill=0)
+    buf = io.BytesIO()
+    img.save(buf, \"PNG\"); buf.seek(0)
+    key = f\"ood/ood_{i:02d}.png\"
+    mc.put_object(\"paperless-images\", key, data=buf, length=len(buf.getvalue()),
+                  content_type=\"image/png\")
+    print(f\"uploaded {key}\")
+PY'" > /dev/null 2>&1
+    OOD_COUNT=$(sg docker -c "docker compose exec -T minio mc ls local/paperless-images/ood/" 2>/dev/null \
+        | grep -c '\.png' || true)
+    ok "OOD samples synthesized + uploaded ($OOD_COUNT PNGs)"
+fi
+
 # ── 12. Fixture upload + rollback-ctrl audit seed + TOKEN ──
 log "[12/12] Final seeds (fixture, rollback audit, TOKEN)"
 CURRENT_STEP="final seeds"
@@ -337,15 +447,23 @@ chmod 600 /tmp/paperless_token
 ok "TOKEN saved to /tmp/paperless_token (source before recording)"
 
 step "pre-uploading handwritten fixture"
-FIXTURE="$DATA_REPO/data_generator/fixtures/handwritten_sample.png"
-if [[ -f "$FIXTURE" ]]; then
+# Prefer the IAM-extracted fixture from step 11a; fall back to the legacy
+# data_generator path for backward-compat if Elnath re-adds it upstream.
+if [[ -f "$FIXTURE_PATH" && -s "$FIXTURE_PATH" ]]; then
+    USE_FIXTURE="$FIXTURE_PATH"
+elif [[ -f "$DATA_REPO/data_generator/fixtures/handwritten_sample.png" ]]; then
+    USE_FIXTURE="$DATA_REPO/data_generator/fixtures/handwritten_sample.png"
+else
+    USE_FIXTURE=""
+fi
+if [[ -n "$USE_FIXTURE" ]]; then
     curl -sf -H "Authorization: Token $TOKEN" \
-      -F "document=@$FIXTURE" \
+      -F "document=@$USE_FIXTURE" \
       -F "title=demo-handwritten-fresh" \
       "http://localhost:8000/api/documents/post_document/" > /dev/null && \
-      ok "fixture uploaded — wait ~45s for async ingestion before bullet 2"
+      ok "fixture uploaded from $USE_FIXTURE (wait ~45s for async ingestion)"
 else
-    warn "fixture missing at $FIXTURE — skipping pre-upload"
+    warn "no handwritten fixture available — skipping pre-upload; bullet 2 will need live upload"
 fi
 
 step "seeding rollback-ctrl audit log with synthetic HtrInputDrift"
