@@ -25,4 +25,5 @@ tasks.json
 # Local session handoff notes (not tracked; per-developer)
 docs/HANDOFF.md
 docs/demo_commands.md
+docs/KNOWN_GAPS.md
 docs/superpowers/
