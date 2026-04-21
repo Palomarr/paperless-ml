@@ -12,6 +12,7 @@ class MlHooksConfig(AppConfig):
     def ready(self):
         self._connect_signals()
         self._install_url_routes()
+        self._install_middleware()
 
     def _connect_signals(self):
         from documents.signals import document_consumption_finished
@@ -71,3 +72,21 @@ class MlHooksConfig(AppConfig):
             "ml_hooks: mounted /api/ml/ routes, /api/search/ override, "
             "and /ml-ui/ feedback UI",
         )
+
+    def _install_middleware(self):
+        """Append MlFeedbackFabMiddleware to settings.MIDDLEWARE if absent.
+
+        Django's BaseHandler.load_middleware() reads settings.MIDDLEWARE at
+        request-dispatch-time (first request after startup), so appending
+        here in ready() lands before the chain is built. Idempotent: checks
+        for the entry before appending so reloads don't duplicate it.
+        """
+        from django.conf import settings
+
+        target = "ml_hooks.middleware.MlFeedbackFabMiddleware"
+        middleware = list(settings.MIDDLEWARE)
+        if target in middleware:
+            return
+        middleware.append(target)
+        settings.MIDDLEWARE = middleware
+        log.info("ml_hooks: installed MlFeedbackFabMiddleware")
