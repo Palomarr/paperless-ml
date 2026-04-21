@@ -132,7 +132,35 @@ else
     clone_if_missing "https://github.com/gdtmax/paperless_training_integration.git" \
                      "${PROJECT_PARENT}/paperless_training_integration"
 
-    ok "Peer repos cloned: paperless_data + paperless_data_integration (Elnath), paperless_training_integration (Dongting)"
+    # Dongting's main branch hardcodes http://127.0.0.1:5000 for MLflow in
+    # trainer/mlflow_helper.py, eval.py, quality_gate.py — breaks when
+    # pipeline-scheduler runs train/eval/gate containers on our compose
+    # network. Yikai's PR #1 on gdtmax/paperless_training_integration makes
+    # the URL read from MLFLOW_TRACKING_URI env. PR is awaiting merge; until
+    # then we check out the PR branch directly from Palomarr's fork so the
+    # paperless-training image builds with the fix. Remove this whole block
+    # once Dongting merges PR #1 to main.
+    TRAIN_DIR="${PROJECT_PARENT}/paperless_training_integration"
+    if [[ -d "$TRAIN_DIR/.git" ]]; then
+        (
+            cd "$TRAIN_DIR"
+            if ! git remote | grep -qx 'fork'; then
+                git remote add fork https://github.com/Palomarr/paperless_training_integration.git
+            fi
+            if git fetch --quiet fork 2>/dev/null; then
+                if git rev-parse --verify fork/feat/mlflow-integration-wiring >/dev/null 2>&1; then
+                    git checkout -B feat/mlflow-integration-wiring fork/feat/mlflow-integration-wiring >/dev/null 2>&1
+                    ok "training repo on PR #1 branch (feat/mlflow-integration-wiring) — revert to main after Dongting merges"
+                else
+                    warn "fork/feat/mlflow-integration-wiring not found on Palomarr fork; using whatever's checked out"
+                fi
+            else
+                warn "could not fetch Palomarr fork (network?); using current checkout"
+            fi
+        )
+    fi
+
+    ok "Peer repos cloned: paperless_data + paperless_data_integration (Elnath), paperless_training_integration (Dongting, PR #1 branch)"
 fi
 
 # ===========================================================================
