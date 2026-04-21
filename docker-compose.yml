@@ -16,13 +16,21 @@ services:
       # -h 127.0.0.1 forces a TCP check. Without it, pg_isready talks to
       # the Unix socket, which is open during first-boot init scripts
       # before the TCP listener is bound — dependents see "healthy" and
-      # then hit "connection refused" on :5432. start_period gives the
-      # first-boot initdb room to finish before failures count.
-      test: ["CMD-SHELL", "pg_isready -U paperless -d paperless -h 127.0.0.1 -q"]
-      interval: 5s
-      timeout: 3s
+      # then hit "connection refused" on :5432.
+      #
+      # -t 1 limits pg_isready to a 1s connection timeout. Postgres's
+      # first-boot flow is: initdb → run init scripts → SIGTERM → restart
+      # in TCP mode. If our probes (default 3s timeout) hold connections
+      # open during SIGTERM, postgres refuses to finish shutdown until
+      # clients drain — deadlock. Short probe timeout releases fast.
+      #
+      # start_period 90s covers the full init dance on slow bare-metal;
+      # interval 10s halves probe pressure during that window.
+      test: ["CMD-SHELL", "pg_isready -U paperless -d paperless -h 127.0.0.1 -q -t 1"]
+      interval: 10s
+      timeout: 2s
       retries: 30
-      start_period: 15s
+      start_period: 90s
 
   # Observability: Prometheus scrapes ml-gateway + qdrant /metrics endpoints.
   # Config at ops/prometheus/prometheus.yml.
