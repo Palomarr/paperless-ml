@@ -13,16 +13,36 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U paperless"]
+      # -h 127.0.0.1 forces a TCP check. Without it, pg_isready talks to
+      # the Unix socket, which is open during first-boot init scripts
+      # before the TCP listener is bound — dependents see "healthy" and
+      # then hit "connection refused" on :5432. start_period gives the
+      # first-boot initdb room to finish before failures count.
+      test: ["CMD-SHELL", "pg_isready -U paperless -d paperless -h 127.0.0.1 -q"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
+      start_period: 15s
 
   # Observability: Prometheus scrapes ml-gateway + qdrant /metrics endpoints.
   # Config at ops/prometheus/prometheus.yml.
+  #
+  # Attached to BOTH networks:
+  #   - default (our compose's internal bridge)
+  #     Lets it scrape ml-gateway, qdrant, redpanda, pipeline-scheduler —
+  #     all services declared in this file.
+  #   - paperless_ml_net (shared external)
+  #     Lets it resolve `drift_monitor:8000` — Elnath's drift monitor
+  #     lives in a sibling compose file (paperless_data_integration/
+  #     drift_monitor/compose.yml) that attaches only to paperless_ml_net.
+  #     Without this, the drift-monitor scrape target comes up DOWN with
+  #     "lookup drift_monitor on 127.0.0.11:53: server misbehaving".
   prometheus:
     image: prom/prometheus:v2.54.1
     restart: unless-stopped
+    networks:
+      - default
+      - paperless_ml_net
     ports:
       - "9090:9090"
     volumes:
@@ -318,6 +338,17 @@ services:
     command:
       - |
         set -eu
+        # Defense-in-depth: even with the postgres healthcheck gating us
+        # on TCP readiness, retry briefly in case the TCP listener flaps
+        # during first-boot restart. pg_isready here uses -h postgres so
+        # it tests the exact connection string we're about to use.
+        for i in $$(seq 1 15); do
+          if pg_isready -h postgres -U paperless -d paperless -q; then
+            break
+          fi
+          echo "mlflow-db-init: postgres not yet accepting TCP, retry $$i/15"
+          sleep 2
+        done
         if psql -h postgres -U paperless -lqt | cut -d \| -f 1 | grep -qw mlflow; then
           echo "mlflow-db-init: database 'mlflow' already exists"
         else
