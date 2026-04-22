@@ -93,27 +93,8 @@ else
     goto_seed=0
 fi
 
-# ── 0. Pre-build source patches for upstream bugs ───
-if (( goto_seed == 0 )); then
-log "[0/12] Pre-build source patches for upstream bugs"
-CURRENT_STEP="pre-build patches"
-
-# Dongting's training repo hardcodes http://127.0.0.1:5000 for MLflow in
-# trainer/mlflow_helper.py, eval.py, quality_gate.py. Our pipeline-scheduler
-# passes MLFLOW_TRACKING_URI=http://mlflow:5000 but the code ignores the
-# env. Patch all three files in place so the image we build picks up the
-# compose-network hostname. Upstream fix is in Yikai's PR #1 on
-# gdtmax/paperless_training_integration — remove this block once merged.
-TRAIN_HARDCODED=$(grep -rl 'http://127.0.0.1:5000' "$TRAIN_REPO" --include='*.py' 2>/dev/null || true)
-if [[ -n "$TRAIN_HARDCODED" ]]; then
-    # shellcheck disable=SC2086
-    sed -i 's|http://127.0.0.1:5000|http://mlflow:5000|g' $TRAIN_HARDCODED
-    ok "patched $(echo "$TRAIN_HARDCODED" | wc -l) training-repo files (upstream PR gdtmax#1)"
-else
-    ok "training repo already uses http://mlflow:5000 (Dongting merged PR #1)"
-fi
-
 # ── 1. Build training + data-generator images ───
+if (( goto_seed == 0 )); then
 log "[1/12] Build training + data-generator images (parallel)"
 CURRENT_STEP="build training/data-generator images"
 
@@ -135,20 +116,6 @@ fi
 
 [[ -n "${TRAIN_PID:-}" ]] && wait $TRAIN_PID && ok "paperless-training built"
 [[ -n "${DG_PID:-}" ]]    && wait $DG_PID    && ok "paperless-data-generator built"
-
-# ── 2. Patch Elnath's build_drift_reference.py (upstream bug #2) ──
-log "[2/12] Patch build_drift_reference.py — image_bytes → image_png"
-CURRENT_STEP="sed patch drift reference builder"
-
-BUILDER="$DATA_REPO/scripts/build_drift_reference.py"
-if grep -q 'table.column("image_bytes")' "$BUILDER"; then
-    sed -i 's/table.column("image_bytes")/table.column("image_png")/' "$BUILDER"
-    ok "patched — KNOWN_GAPS bug #2 worked around locally"
-elif grep -q 'table.column("image_png")' "$BUILDER"; then
-    ok "already patched (either we ran earlier or Elnath fixed upstream)"
-else
-    warn "unexpected column reference — $BUILDER may have diverged; inspect manually"
-fi
 
 # ── 3. Ingest IAM (direct docker run, not `make`) ──
 if (( SKIP_INGEST == 1 )); then
@@ -211,24 +178,26 @@ fi
 log "[6/12] Build paperless-batch image"
 CURRENT_STEP="build paperless-batch image"
 
-if sg docker -c 'docker image inspect paperless-batch' >/dev/null 2>&1; then
-    ok "paperless-batch already built"
-else
-    (cd "$DATA_REPO" && sg docker -c 'docker build -q -t paperless-batch ./batch_pipeline' > /dev/null)
-    ok "paperless-batch built"
-fi
+# Rebuild on every warm-up so upstream requirements.txt changes (Elnath's
+# `Pillow==11.0.0` add in commit 4922cd2) land in the cached image. Docker
+# layer cache makes this ~1s when nothing has changed.
+(cd "$DATA_REPO" && sg docker -c 'docker build -q -t paperless-batch ./batch_pipeline' > /dev/null)
+ok "paperless-batch built (or cache-hit)"
 
-# ── 7. Run validate_ingestion (inline Pillow, upstream bug #1) ──
-log "[7/12] Run validate_ingestion.py (expected I2 FAIL — narratable)"
+# ── 7. Run validate_ingestion ──
+# Upstream bug #1 (missing Pillow) + bug #3 (I2 schema expectations) both
+# fixed in Elnath's 4922cd2 — no inline pip needed, I2 passes on healthy
+# IAM ingest. Non-zero exit still tolerated because SQuAD S0 will fail
+# when we skip ingest-squad to keep warm-up fast.
+log "[7/12] Run validate_ingestion.py"
 CURRENT_STEP="validate ingestion"
 
 sg docker -c "docker run --rm --network $NETWORK \
   -e MINIO_ENDPOINT=minio:9000 \
   -e MINIO_ACCESS_KEY=minioadmin \
   -e MINIO_SECRET_KEY=minioadmin \
-  -w /app --entrypoint sh paperless-batch \
-  -c 'pip install --quiet Pillow==11.0.0 && python validate_ingestion.py'" || \
-    warn "validate_ingestion returned non-zero (expected for I2 schema FAIL)"
+  -w /app paperless-batch python validate_ingestion.py" || \
+    warn "validate_ingestion returned non-zero (expected if SQuAD not ingested)"
 
 ok "validation reports written to MinIO _validation/ prefixes"
 
@@ -362,7 +331,6 @@ else
       -e MINIO_ACCESS_KEY=minioadmin \
       -e MINIO_SECRET_KEY=minioadmin \
       -w /app --entrypoint sh paperless-batch -c '
-pip install --quiet Pillow==11.0.0 > /dev/null 2>&1
 python - <<PY
 import io, pyarrow.parquet as pq
 from minio import Minio
@@ -404,7 +372,6 @@ else
       -e MINIO_ACCESS_KEY=minioadmin \
       -e MINIO_SECRET_KEY=minioadmin \
       -w /app --entrypoint sh paperless-batch -c '
-pip install --quiet Pillow==11.0.0 > /dev/null 2>&1
 python - <<PY
 import io
 from PIL import Image, ImageDraw
