@@ -16,7 +16,11 @@ from PIL import Image
 from pydantic import BaseModel
 from transformers import AutoTokenizer, TrOCRProcessor
 
-from s3_utils import download_image_from_s3
+from s3_utils import (
+    download_image_from_s3,
+    download_file_from_s3,
+    download_prefix_from_s3,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,24 @@ logger = logging.getLogger(__name__)
 ONNX_DIR = os.environ.get("ONNX_DIR", "/models")
 BIENCODER_PATH = os.path.join(ONNX_DIR, "biencoder.onnx")
 HTR_DIR = os.path.join(ONNX_DIR, "htr_onnx")
+
+# Optional runtime model-fetch URIs. When set, ml-gateway downloads the
+# referenced artifacts from MinIO into ONNX_DIR at boot, OVERWRITING the
+# image-baked defaults. This is how fine-tuned checkpoints produced by the
+# retraining pipeline land in the serving path without rebuilding the
+# image — promote_latest() in pipeline-scheduler sets these via compose
+# `environment:` on ml-gateway restart.
+#
+# Expected formats:
+#   HTR_MODEL_URI       = s3://paperless-datalake/warehouse/models/trocr-ft-v<N>/onnx/
+#                         (prefix containing encoder_model.onnx + decoder_model.onnx + etc.)
+#   EMBEDDING_MODEL_URI = s3://paperless-datalake/warehouse/models/mpnet-ft-v<N>/biencoder.onnx
+#                         (single file) OR a prefix containing biencoder.onnx.
+#
+# When unset, the app loads ONNX files that are expected to already exist
+# in ONNX_DIR (baked into the image or mounted via compose volume).
+HTR_MODEL_URI = os.environ.get("HTR_MODEL_URI", "").strip()
+EMBEDDING_MODEL_URI = os.environ.get("EMBEDDING_MODEL_URI", "").strip()
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "qdrant")
 QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
@@ -47,6 +69,49 @@ if "CUDAExecutionProvider" in active_providers:
 else:
     providers = ["CPUExecutionProvider"]
     device = "cpu"
+
+# ---------------------------------------------------------------------------
+# Fetch model artifacts from MinIO if URIs are configured
+# ---------------------------------------------------------------------------
+
+if HTR_MODEL_URI:
+    logger.warning(
+        "HTR_MODEL_URI set (%s) — fetching fine-tuned TrOCR ONNX from MinIO",
+        HTR_MODEL_URI,
+    )
+    try:
+        download_prefix_from_s3(HTR_MODEL_URI, HTR_DIR)
+        logger.warning("HTR ONNX downloaded to %s", HTR_DIR)
+    except Exception as e:
+        logger.error("HTR_MODEL_URI fetch failed: %s", e)
+        raise
+else:
+    logger.info(
+        "HTR_MODEL_URI not set — using image-baked ONNX in %s", HTR_DIR,
+    )
+
+if EMBEDDING_MODEL_URI:
+    logger.warning(
+        "EMBEDDING_MODEL_URI set (%s) — fetching bi-encoder ONNX from MinIO",
+        EMBEDDING_MODEL_URI,
+    )
+    try:
+        # Accept either a single-file URI (ends with .onnx) or a directory
+        # prefix. Directory form downloads every object under it and we
+        # assume one of them is biencoder.onnx at the root.
+        if EMBEDDING_MODEL_URI.endswith(".onnx"):
+            download_file_from_s3(EMBEDDING_MODEL_URI, BIENCODER_PATH)
+        else:
+            download_prefix_from_s3(EMBEDDING_MODEL_URI, os.path.dirname(BIENCODER_PATH))
+        logger.warning("Bi-encoder ONNX at %s", BIENCODER_PATH)
+    except Exception as e:
+        logger.error("EMBEDDING_MODEL_URI fetch failed: %s", e)
+        raise
+else:
+    logger.info(
+        "EMBEDDING_MODEL_URI not set — using image-baked ONNX at %s",
+        BIENCODER_PATH,
+    )
 
 # ---------------------------------------------------------------------------
 # Model loading

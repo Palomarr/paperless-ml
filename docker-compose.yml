@@ -324,6 +324,15 @@ services:
       # persistent object store; see docs/DEPLOYMENT.md §10.
       WAREHOUSE_BUCKET: paperless-datalake
       WAREHOUSE_PREFIX: warehouse
+      # Optional fine-tuned model URIs. When set, the ONNX-Runtime serving
+      # variant (app_ort.py, pulled in via Dockerfile.fastapi-ort) downloads
+      # the artifacts from MinIO at boot — OVERWRITING the image-baked
+      # stock HuggingFace weights. Populated by pipeline-scheduler's
+      # promote_latest() on a gate-passing retraining run. Empty default
+      # keeps stock behavior. Only consumed by app_ort.py; app.py (current
+      # PyTorch-CPU variant) ignores these.
+      HTR_MODEL_URI: ""
+      EMBEDDING_MODEL_URI: ""
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
