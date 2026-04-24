@@ -107,7 +107,7 @@ services:
         condition: service_healthy
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      ROLLBACK_MODEL_NAME: paperless-htr
+      ROLLBACK_MODEL_NAME: htr
       ROLLBACK_ALIAS: production
       ML_GATEWAY_CONTAINER: paperless-ml-ml-gateway-1
       ROLLBACK_COOLDOWN_SECONDS: "300"
@@ -317,6 +317,12 @@ services:
       # /htr fetches region crops from MinIO via crop_s3_url (Elnath's pipeline).
       # Must match our MinIO defaults; the image ships with admin/paperless_minio
       # defaults that predate our rename.
+      #
+      # Note: peer-repo containers (Elnath's trainer, his Airflow tasks) also
+      # ship with admin/paperless_minio defaults. When they run against our
+      # stack, their compose / Airflow task-level env overrides must set these
+      # same minioadmin/minioadmin values — this is pure coordination, no code
+      # change needed on either side.
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -438,7 +444,7 @@ services:
       - "8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MODEL_NAME: paperless-htr
+      MODEL_NAME: htr
       PRODUCTION_ALIAS: production
       TRAINING_IMAGE: paperless-training
       PAPERLESS_NET: paperless_ml_net

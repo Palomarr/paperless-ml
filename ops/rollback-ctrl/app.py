@@ -2,7 +2,7 @@
 
 Receives Alertmanager webhook payloads. For alerts labeled
 `rollback_trigger: "true"` that are firing (not resolved), executes a
-rollback: moves the `@production` alias on MLflow's paperless-htr
+rollback: moves the `@production` alias on MLflow's htr
 registered model to the previous version, then restarts the ml-gateway
 container so it picks up the reverted weights on its next boot.
 
@@ -63,7 +63,7 @@ log = logging.getLogger("rollback-ctrl")
 
 # --- Config (env-overridable for test) ---
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
-MODEL_NAME = os.environ.get("ROLLBACK_MODEL_NAME", "paperless-htr")
+MODEL_NAME = os.environ.get("ROLLBACK_MODEL_NAME", "htr")
 PRODUCTION_ALIAS = os.environ.get("ROLLBACK_ALIAS", "production")
 ML_GATEWAY_CONTAINER = os.environ.get("ML_GATEWAY_CONTAINER", "paperless-ml-ml-gateway-1")
 COOLDOWN_SECONDS = int(os.environ.get("ROLLBACK_COOLDOWN_SECONDS", "300"))  # 5 min

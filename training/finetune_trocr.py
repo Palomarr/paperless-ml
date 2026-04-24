@@ -22,7 +22,7 @@ Writes:
       s3://paperless-datalake/warehouse/models/trocr-ft-v<N>/onnx/
     - MLflow run with CER on test split, hyperparameters, tags
     - (Optional, flag-gated) registered model version on MLflow's
-      paperless-htr registry so downstream alias promotion works
+      htr registry so downstream alias promotion works
 
 Run:
     # Inside a GPU-enabled container with MLflow + MinIO reachable
@@ -87,7 +87,7 @@ DEFAULT_MODEL = "microsoft/trocr-small-handwritten"
 IAM_BUCKET = "paperless-datalake"
 IAM_PREFIX = "warehouse/iam_dataset"
 MODELS_PREFIX = "warehouse/models"
-REGISTERED_MODEL_NAME = "paperless-htr"
+REGISTERED_MODEL_NAME = "htr"
 
 
 def minio_client() -> Minio:

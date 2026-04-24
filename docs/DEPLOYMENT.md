@@ -164,7 +164,7 @@ docker compose -f docker-compose.yml -f docker-compose.shared.yml down
 | `network paperless_ml_net exists but was not created by compose` | Stale network from pre-IaC-refactor state (pre-`9e46055`) still has no compose label | `docker compose down && docker network rm paperless_ml_net && docker compose up -d` — compose recreates with the proper label on first boot |
 | Prometheus doesn't pick up a new scrape target or alert rule after `git pull` | Bind-mount inode staleness: `git pull` atomically-renames files, leaving the container pointed at the old inode | `docker compose up -d --force-recreate prometheus` — `restart` is not enough, the container must be torn down so the mount re-resolves |
 | `pipeline-scheduler` logs "skipped_insufficient_corrections" forever | Production defaults require ≥500 new corrections AND ≥24h since last run; on a fresh stack neither is met | For demo/testing: `docker compose exec pipeline-scheduler python force_tick.py` — bypasses both gates and runs one pipeline cycle |
-| `rollback-ctrl` returns `at_version_floor` | Only one registered version of `paperless-htr` exists — nothing to roll back to | Train + register additional versions first (scheduler creates one per gate pass), or seed a stub version for demo via `mlflow.pyfunc.log_model(..., registered_model_name="paperless-htr")` |
+| `rollback-ctrl` returns `at_version_floor` | Only one registered version of `htr` exists — nothing to roll back to | Train + register additional versions first (scheduler creates one per gate pass), or seed a stub version for demo via `mlflow.pyfunc.log_model(..., registered_model_name="htr")` |
 
 ## 8. Flags
 

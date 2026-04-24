@@ -123,10 +123,37 @@ biencoder_tokenizer = AutoTokenizer.from_pretrained(
     "sentence-transformers/all-mpnet-base-v2"
 )
 
-# TrOCR via optimum ORT wrapper
+# TrOCR via optimum ORT wrapper. Supports two input layouts at HTR_DIR:
+#
+#   (fast path) HTR_DIR contains pre-exported ONNX files:
+#     encoder_model.onnx, decoder_model.onnx, decoder_with_past_model.onnx
+#     → loads directly, no export step.
+#
+#   (compat path) HTR_DIR contains an HF safetensors checkpoint only:
+#     config.json, model.safetensors, preprocessor_config.json, tokenizer files
+#     → optimum runs the ONNX export at load time (~1-3 min cold-boot
+#     depending on hardware). Added so we can consume fine-tuned checkpoints
+#     from upstream training pipelines that don't emit ONNX themselves
+#     (e.g., REDES01/paperless_data_integration/training/trainer.py uses
+#     `mlflow.transformers.log_model` which stores safetensors only).
+#
+# Detection: presence of encoder_model.onnx in HTR_DIR.
 from optimum.onnxruntime import ORTModelForVision2Seq
 
-trocr_model = ORTModelForVision2Seq.from_pretrained(HTR_DIR, provider=providers[0])
+_htr_has_onnx = os.path.exists(os.path.join(HTR_DIR, "encoder_model.onnx"))
+if _htr_has_onnx:
+    logger.info("HTR dir has pre-exported ONNX — loading directly from %s", HTR_DIR)
+    trocr_model = ORTModelForVision2Seq.from_pretrained(
+        HTR_DIR, provider=providers[0],
+    )
+else:
+    logger.warning(
+        "HTR dir at %s has no encoder_model.onnx — treating as HF checkpoint; "
+        "optimum will auto-export to ONNX at load time (~1-3 min)", HTR_DIR,
+    )
+    trocr_model = ORTModelForVision2Seq.from_pretrained(
+        HTR_DIR, provider=providers[0], export=True,
+    )
 # NOTE: We use TrOCR's AutoProcessor for preprocessing (resize, normalize to
 # ImageNet stats, etc.) because our model expects that format.  Elnath's
 # feature pipeline preprocesses differently (grayscale, 128px height, [-1,1]

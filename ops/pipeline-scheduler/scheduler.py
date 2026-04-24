@@ -104,7 +104,7 @@ class Config:
             min_corrections=int(os.environ.get("MIN_CORRECTIONS_DELTA", "500")),
             min_hours=float(os.environ.get("MIN_HOURS_SINCE_LAST_RUN", "24")),
             mlflow_uri=os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
-            model_name=os.environ.get("MODEL_NAME", "paperless-htr"),
+            model_name=os.environ.get("MODEL_NAME", "htr"),
             production_alias=os.environ.get("PRODUCTION_ALIAS", "production"),
             training_image=os.environ.get("TRAINING_IMAGE", "paperless-training"),
             paperless_net=os.environ.get("PAPERLESS_NET", "paperless_ml_net"),

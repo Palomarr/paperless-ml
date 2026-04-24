@@ -24,17 +24,17 @@
 #   import mlflow
 #   with mlflow.start_run() as run:
 #       ...train...
-#       mlflow.pytorch.log_model(model, "model", registered_model_name="paperless-htr")
+#       mlflow.pytorch.log_model(model, "model", registered_model_name="htr")
 #       # OR, gated by quality check:
 #       if cer < 0.15:
-#           mlflow.register_model(f"runs:/{run.info.run_id}/model", "paperless-htr")
+#           mlflow.register_model(f"runs:/{run.info.run_id}/model", "htr")
 #
 # ============================================================================
 
 set -euo pipefail
 
 # ---------- config ----------
-MODEL_NAME="${MODEL_NAME:-paperless-htr}"
+MODEL_NAME="${MODEL_NAME:-htr}"
 WAREHOUSE_BUCKET="${WAREHOUSE_BUCKET:-paperless-datalake}"
 DRY_RUN=0
 

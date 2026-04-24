@@ -282,7 +282,7 @@ fi
 fi  # end of the big "if goto_seed == 0" block
 
 # ── 11. Seed MLflow with 2 stub versions + set @production ──
-log "[11/12] Seed MLflow paperless-htr (≥2 versions for bullets 5+6)"
+log "[11/12] Seed MLflow htr (≥2 versions for bullets 5+6)"
 CURRENT_STEP="seed MLflow"
 
 cd "$PAPERLESS_ML"
@@ -297,17 +297,17 @@ mlflow.set_tracking_uri('http://localhost:5000')
 mlflow.set_experiment('seed-for-demo')
 c = MlflowClient('http://localhost:5000')
 
-current = len(c.search_model_versions(\"name='paperless-htr'\"))
+current = len(c.search_model_versions(\"name='htr'\"))
 for _ in range(max(0, 2 - current)):
     with mlflow.start_run():
         mlflow.pyfunc.log_model(
             artifact_path='model', python_model=Stub(),
-            registered_model_name='paperless-htr',
+            registered_model_name='htr',
         )
 
-versions = sorted(c.search_model_versions(\"name='paperless-htr'\"), key=lambda v: int(v.version))
+versions = sorted(c.search_model_versions(\"name='htr'\"), key=lambda v: int(v.version))
 print(f'versions: {[v.version for v in versions]}')
-c.set_registered_model_alias('paperless-htr', 'production', versions[-1].version)
+c.set_registered_model_alias('htr', 'production', versions[-1].version)
 print(f'@production: v{versions[-1].version}')
 PY
 "
@@ -452,7 +452,7 @@ step "resetting @production to v2 (rollback demo needs two versions below)"
 sg docker -c "docker compose exec -T mlflow python - <<'PY'
 from mlflow import MlflowClient
 c = MlflowClient('http://localhost:5000')
-c.set_registered_model_alias('paperless-htr', 'production', '2')
+c.set_registered_model_alias('htr', 'production', '2')
 print('@production reset to v2')
 PY
 "
@@ -475,8 +475,8 @@ echo "───── MLflow state ─────"
 sg docker -c "docker compose exec -T mlflow python - <<'PY'
 from mlflow import MlflowClient
 c = MlflowClient('http://localhost:5000')
-versions = c.search_model_versions(\"name='paperless-htr'\")
-mv = c.get_model_version_by_alias('paperless-htr', 'production')
+versions = c.search_model_versions(\"name='htr'\")
+mv = c.get_model_version_by_alias('htr', 'production')
 print(f'  versions: {len(versions)}')
 print(f'  @production: v{mv.version}')
 PY

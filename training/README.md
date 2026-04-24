@@ -15,7 +15,7 @@ this script is the training body that produces the weights.
 5. Uploads fine-tuned safetensors + ONNX to
    `warehouse/models/trocr-ft-v<VERSION>/` on MinIO
 6. Logs run to MLflow (params, metrics, tags pointing at MinIO path)
-7. Optionally registers as `paperless-htr` in MLflow's model registry
+7. Optionally registers as `htr` in MLflow's model registry
    (`--register` flag) so downstream `@production` alias promotion works
 
 ## Prerequisites
@@ -31,7 +31,7 @@ this script is the training body that produces the weights.
 
 ```bash
 cd ~/paperless-ml/training
-sg docker -c 'docker build -t paperless-htr-finetune .'
+sg docker -c 'docker build -t htr-finetune .'
 
 # ~30-60 min on P100 for 2 epochs over IAM (~6500 rows)
 sg docker -c 'docker run --rm --network paperless_ml_net --gpus all \
@@ -39,7 +39,7 @@ sg docker -c 'docker run --rm --network paperless_ml_net --gpus all \
   -e MINIO_ACCESS_KEY=minioadmin \
   -e MINIO_SECRET_KEY=minioadmin \
   -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
-  paperless-htr-finetune \
+  htr-finetune \
     --epochs 2 --batch-size 8 --register'
 ```
 
@@ -59,7 +59,7 @@ docker compose --profile training run --rm htr-finetune --epochs 2 --register
 | `--lr` | 5e-5 | Learning rate |
 | `--mlflow-uri` | `$MLFLOW_TRACKING_URI` or `http://mlflow:5000` | Tracking server |
 | `--experiment` | `htr-finetune` | MLflow experiment name |
-| `--register` | off | Register as `paperless-htr` in MLflow registry |
+| `--register` | off | Register as `htr` in MLflow registry |
 | `--version-tag` | timestamp | Tag for MinIO artifact path |
 | `--skip-onnx-export` | off | Smoke-test train loop without ONNX step |
 
