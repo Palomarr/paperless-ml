@@ -62,9 +62,13 @@ import time
 import traceback
 from dataclasses import dataclass
 
+from urllib.parse import urlparse
+
 import docker
 import mlflow
 import psycopg2
+from minio import Minio
+from minio.commonconfig import CopySource
 from mlflow.tracking import MlflowClient
 from prometheus_client import Counter, Gauge, start_http_server
 
@@ -96,6 +100,13 @@ class Config:
     pg_user: str
     pg_password: str
     metrics_port: int
+    # MinIO — used by sync_to_production_prefix() after promote
+    minio_endpoint: str
+    minio_access_key: str
+    minio_secret_key: str
+    minio_secure: bool
+    production_bucket: str
+    production_prefix: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -116,6 +127,16 @@ class Config:
             pg_user=os.environ.get("POSTGRES_USER", "paperless"),
             pg_password=os.environ.get("POSTGRES_PASSWORD", "paperless"),
             metrics_port=int(os.environ.get("METRICS_PORT", "8000")),
+            minio_endpoint=os.environ.get("MINIO_ENDPOINT", "minio:9000"),
+            minio_access_key=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
+            minio_secret_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+            minio_secure=os.environ.get("MINIO_SECURE", "false").lower() == "true",
+            production_bucket=os.environ.get(
+                "PRODUCTION_BUCKET", "paperless-datalake"
+            ),
+            production_prefix=os.environ.get(
+                "PRODUCTION_PREFIX", "warehouse/models/htr/production"
+            ),
         )
 
 
@@ -156,6 +177,12 @@ class PipelineScheduler:
         self.docker = docker.from_env()
         self.mlflow = MlflowClient(tracking_uri=cfg.mlflow_uri)
         mlflow.set_tracking_uri(cfg.mlflow_uri)
+        self.minio = Minio(
+            cfg.minio_endpoint,
+            access_key=cfg.minio_access_key,
+            secret_key=cfg.minio_secret_key,
+            secure=cfg.minio_secure,
+        )
 
         # State
         self.last_trigger_time: float = 0.0
@@ -252,6 +279,71 @@ class PipelineScheduler:
 
         return {"status": "COMPLETE", "results": results}
 
+    def _sync_to_production_prefix(self, model_version) -> int:
+        """Copy model_version's MinIO artifacts to a fixed production prefix.
+
+        Why fixed prefix + copy instead of updating HTR_MODEL_URI:
+            docker-compose seals env vars at container create time.
+            Changing HTR_MODEL_URI on promote would require --force-recreate
+            (not just restart). A fixed prefix whose contents we swap lets
+            ml-gateway's env stay constant — a restart is enough to pick up
+            new weights on next boot.
+
+        Uses MinIO server-side copy_object (no download-upload round trip),
+        so the ~1GB TrOCR safetensors copy is effectively instantaneous.
+
+        Returns number of objects copied. Raises on failure so caller can
+        decide whether to continue to container restart.
+        """
+        source_uri = model_version.source
+        parsed = urlparse(source_uri)
+        if parsed.scheme not in ("s3", "mlflow-artifacts"):
+            raise RuntimeError(
+                f"unsupported source scheme: {source_uri!r} "
+                f"(expected s3:// or mlflow-artifacts://)"
+            )
+        src_bucket = parsed.netloc or self.cfg.production_bucket
+        src_prefix = parsed.path.lstrip("/")
+        if src_prefix and not src_prefix.endswith("/"):
+            src_prefix = src_prefix + "/"
+
+        dst_bucket = self.cfg.production_bucket
+        dst_prefix = self.cfg.production_prefix.rstrip("/") + "/"
+
+        # Purge previous production contents so stale files from the prior
+        # version don't confuse the serving container's format detection.
+        removed = 0
+        for obj in self.minio.list_objects(dst_bucket, prefix=dst_prefix, recursive=True):
+            self.minio.remove_object(dst_bucket, obj.object_name)
+            removed += 1
+        if removed:
+            log.info(f"PROMOTE: cleared {removed} existing objects under {dst_prefix}")
+
+        # Copy new files. Server-side copy — no data transits the scheduler.
+        copied = 0
+        for obj in self.minio.list_objects(src_bucket, prefix=src_prefix, recursive=True):
+            rel = obj.object_name[len(src_prefix):]
+            if not rel:
+                continue
+            dst_key = dst_prefix + rel
+            self.minio.copy_object(
+                dst_bucket, dst_key,
+                CopySource(src_bucket, obj.object_name),
+            )
+            copied += 1
+
+        if copied == 0:
+            raise RuntimeError(
+                f"no objects under s3://{src_bucket}/{src_prefix} — "
+                f"refusing to publish empty production prefix"
+            )
+
+        log.warning(
+            f"PROMOTE: synced {copied} files "
+            f"s3://{src_bucket}/{src_prefix} -> s3://{dst_bucket}/{dst_prefix}"
+        )
+        return copied
+
     def promote_latest(self) -> dict:
         """Move @production alias to the latest registered version + restart ml-gateway."""
         versions = self.mlflow.search_model_versions(f"name='{self.cfg.model_name}'")
@@ -268,6 +360,20 @@ class PipelineScheduler:
             f"PROMOTE: {self.cfg.model_name} @{self.cfg.production_alias} -> v{latest.version}"
         )
 
+        # Sync MinIO artifacts to the fixed production prefix so ml-gateway's
+        # HTR_MODEL_URI (a static compose env) picks up the new weights on
+        # restart. See _sync_to_production_prefix docstring for rationale.
+        try:
+            copied = self._sync_to_production_prefix(latest)
+            sync_status = f"synced_{copied}_files"
+        except Exception as e:
+            log.error(f"PROMOTE: production sync failed: {e}")
+            sync_status = f"sync_failed: {e}"
+            # Continue to restart anyway — alias is still moved, and the
+            # previous production prefix is either intact (previous version
+            # still usable) or we've purged some (broken state but restart
+            # will fail loudly which is better than silent stale serving).
+
         try:
             container = self.docker.containers.get(self.cfg.ml_gateway_container)
             container.restart(timeout=30)
@@ -277,7 +383,11 @@ class PipelineScheduler:
             log.error(f"PROMOTE: ml-gateway restart failed: {e}")
             restart_status = f"restart_failed: {e}"
 
-        return {"promoted_version": latest.version, "ml_gateway": restart_status}
+        return {
+            "promoted_version": latest.version,
+            "production_sync": sync_status,
+            "ml_gateway": restart_status,
+        }
 
     # ── Main tick ──
     def tick(self) -> None:

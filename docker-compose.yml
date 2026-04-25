@@ -330,14 +330,25 @@ services:
       # persistent object store; see docs/DEPLOYMENT.md §10.
       WAREHOUSE_BUCKET: paperless-datalake
       WAREHOUSE_PREFIX: warehouse
-      # Optional fine-tuned model URIs. When set, the ONNX-Runtime serving
-      # variant (app_ort.py, pulled in via Dockerfile.fastapi-ort) downloads
-      # the artifacts from MinIO at boot — OVERWRITING the image-baked
-      # stock HuggingFace weights. Populated by pipeline-scheduler's
-      # promote_latest() on a gate-passing retraining run. Empty default
-      # keeps stock behavior. Only consumed by app_ort.py; app.py (current
-      # PyTorch-CPU variant) ignores these.
-      HTR_MODEL_URI: ""
+      # Fine-tuned-model URIs. When the ONNX-Runtime serving variant
+      # (app_ort.py, pulled in via Dockerfile.fastapi-ort) is the active
+      # dockerfile, ml-gateway downloads the artifacts at the URIs below
+      # during boot — OVERWRITING the image-baked stock HuggingFace weights.
+      #
+      # Path is a stable fixed "production" prefix whose *contents* get
+      # swapped out by pipeline-scheduler on promote (server-side mc cp,
+      # see ops/pipeline-scheduler/scheduler.py:_sync_to_production_prefix).
+      # This keeps HTR_MODEL_URI as a static compose env — only a
+      # container restart is needed to pick up new weights, not a recreate.
+      #
+      # When Elnath's Airflow trainer is not yet deployed (or the prefix is
+      # empty on a fresh node), app_ort.py's download_prefix_from_s3 raises
+      # and ml-gateway fails to boot — which is correct behavior: better to
+      # fail loudly than to silently serve an undetermined model.
+      #
+      # app.py (current PyTorch-CPU variant) ignores these env vars; they're
+      # only consumed by app_ort.py.
+      HTR_MODEL_URI: "s3://paperless-datalake/warehouse/models/htr/production/"
       EMBEDDING_MODEL_URI: ""
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
@@ -459,6 +470,16 @@ services:
       POLL_INTERVAL_SECONDS: "600"
       MIN_CORRECTIONS_DELTA: "500"
       MIN_HOURS_SINCE_LAST_RUN: "24"
+      # MinIO creds for production-prefix sync on promote. See
+      # scheduler.py:_sync_to_production_prefix — after a gate-passing
+      # retraining run, MLflow artifacts are server-side-copied to the
+      # fixed production prefix so ml-gateway's HTR_MODEL_URI (a static
+      # compose env) picks up the new weights on the next restart.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      PRODUCTION_BUCKET: paperless-datalake
+      PRODUCTION_PREFIX: warehouse/models/htr/production
     volumes:
       # See rollback-ctrl for the security-note rationale — same tradeoff.
       - /var/run/docker.sock:/var/run/docker.sock
