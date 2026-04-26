@@ -423,9 +423,12 @@ esac
 # ---------- checkpoint 15: direct /htr call exercises the TrOCR runtime ----------
 # Elnath's external htr_consumer is the usual /htr caller; without it, the
 # TrOCR runtime path goes untested even though /search/* exercises bi-encoder.
-# A 1×1 PNG is enough — we're checking the contract, not transcription quality.
+# Use a realistic 256×64 white PNG — the optimum/ORT path in app_ort.py uses
+# transformers' DeiT image processor which mis-infers num_channels=1 on 1×1
+# inputs (every dimension being 1 confuses the channel-dim heuristic). The
+# white image is a contract test, not a transcription quality test.
 info "Checkpoint 15: POST /htr returns valid HTRResponse (TrOCR runtime live)"
-TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAQAAAABACAIAAAB6Pz7pAAAAwklEQVR4nO3TMQEAAAiAMPuX1hgebAl4mIWw+Q6ATwYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQNoBLgJLMo989QEAAAAASUVORK5CYII="
 attempt=0
 htr_resp=""
 htr_model_version=""

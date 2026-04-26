@@ -155,9 +155,11 @@ done
 # Our own /htr endpoint isn't called in standalone mode (Elnath's consumer is
 # the usual caller). Without it, the HTR-correction-rate Grafana panel's
 # denominator is zero and the ratio is NaN. Fire a few direct TrOCR calls
-# with a 1×1 PNG base64 so the counter is non-zero.
-log "Firing 5 synthetic /htr calls (1×1 PNG) to populate htr_requests_total"
-TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+# with a realistic 256×64 white PNG so the counter is non-zero.
+# (Earlier 1×1 PNG tripped DeiT's channel-dim heuristic in the optimum/ORT
+# path — see verify_integration.sh checkpoint 15 comment for details.)
+log "Firing 5 synthetic /htr calls (256×64 white PNG) to populate htr_requests_total"
+TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAQAAAABACAIAAAB6Pz7pAAAAwklEQVR4nO3TMQEAAAiAMPuX1hgebAl4mIWw+Q6ATwYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQNoBLgJLMo989QEAAAAASUVORK5CYII="
 for i in 1 2 3 4 5; do
     # Retry up to 3 times: TrOCR can be slow to warm up on first call (~5s).
     if curl -fsS -m 30 -X POST \
