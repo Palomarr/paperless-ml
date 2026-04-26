@@ -1,0 +1,79 @@
+{
+  "input_mode": "base64",
+  "/htr": [
+    {
+      "concurrency": 1,
+      "num_requests": 50,
+      "p50_ms": 173.5,
+      "p95_ms": 186.9,
+      "throughput_rps": 5.75,
+      "error_rate": 0.0,
+      "wall_time_s": 8.7
+    },
+    {
+      "concurrency": 4,
+      "num_requests": 50,
+      "p50_ms": 701.6,
+      "p95_ms": 724.3,
+      "throughput_rps": 5.7,
+      "error_rate": 0.0,
+      "wall_time_s": 8.77
+    },
+    {
+      "concurrency": 8,
+      "num_requests": 50,
+      "p50_ms": 1399.9,
+      "p95_ms": 1462.7,
+      "throughput_rps": 5.68,
+      "error_rate": 0.0,
+      "wall_time_s": 8.8
+    },
+    {
+      "concurrency": 16,
+      "num_requests": 50,
+      "p50_ms": 2748.7,
+      "p95_ms": 2810.4,
+      "throughput_rps": 5.77,
+      "error_rate": 0.0,
+      "wall_time_s": 8.67
+    }
+  ],
+  "/search/query": [
+    {
+      "concurrency": 1,
+      "num_requests": 50,
+      "p50_ms": 10.5,
+      "p95_ms": 11.4,
+      "throughput_rps": 91.73,
+      "error_rate": 0.0,
+      "wall_time_s": 0.55
+    },
+    {
+      "concurrency": 4,
+      "num_requests": 50,
+      "p50_ms": 39.2,
+      "p95_ms": 39.9,
+      "throughput_rps": 100.63,
+      "error_rate": 0.0,
+      "wall_time_s": 0.5
+    },
+    {
+      "concurrency": 8,
+      "num_requests": 50,
+      "p50_ms": 77.8,
+      "p95_ms": 78.7,
+      "throughput_rps": 101.31,
+      "error_rate": 0.0,
+      "wall_time_s": 0.49
+    },
+    {
+      "concurrency": 16,
+      "num_requests": 50,
+      "p50_ms": 156.7,
+      "p95_ms": 158.9,
+      "throughput_rps": 98.56,
+      "error_rate": 0.0,
+      "wall_time_s": 0.51
+    }
+  ]
+}
