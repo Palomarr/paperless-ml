@@ -176,18 +176,28 @@ up_htr_consumer() {
         warn "  PAPERLESS_TOKEN=\$TOKEN bash $0 tier2"
         return 1
     fi
-    info "Bringing up htr_consumer (with HTR_ENDPOINT=/htr + MinIO cred override)"
-    # Override compose: peer compose hardcodes MinIO creds + old route name.
-    # Shell env-var injection won't override literal compose values, so we
-    # use a real override compose file.
+    info "Bringing up htr_consumer (with HTR_ENDPOINT + MinIO + Kafka tuning overrides)"
+    # Override compose: addresses three peer-compose issues:
+    #  1. HTR_ENDPOINT hardcoded to /predict/htr — override to /htr
+    #  2. MinIO creds hardcoded admin/paperless_minio — override to minioadmin/minioadmin
+    #  3. KafkaConsumer uses kafka-python defaults (max_poll_interval=300s,
+    #     max_poll_records=500). Long documents (e.g. 241-page books) take
+    #     longer than 5 min to process, exceed the poll interval, get the
+    #     consumer kicked from group, infinite-loop on restart. The patched
+    #     consumer.py at scripts/peer_patches/htr_consumer.py adds env-driven
+    #     overrides; we bind-mount it over the upstream file.
     local override="/tmp/htr_consumer.override.yml"
-    cat > "$override" <<'EOF'
+    cat > "$override" <<EOF
 services:
   htr_consumer:
     environment:
       HTR_ENDPOINT: /htr
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+      KAFKA_MAX_POLL_RECORDS: "1"
+    volumes:
+      - ${ROOT_DIR}/scripts/peer_patches/htr_consumer.py:/app/consumer.py:ro
 EOF
     cd "$PEER_INT_DIR"
     docker compose -p htr_consumer \
@@ -196,7 +206,7 @@ EOF
         up -d --build --force-recreate
     cd "$ROOT_DIR"
     sleep 5
-    ok "htr_consumer running (logs: docker logs -f htr_consumer)"
+    ok "htr_consumer running with kafka tuning patch (logs: docker logs -f htr_consumer)"
 }
 
 up_drift_monitor() {
