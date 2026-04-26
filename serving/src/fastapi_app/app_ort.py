@@ -195,11 +195,16 @@ else:
 # Detection: presence of encoder_model.onnx in HTR_DIR.
 from optimum.onnxruntime import ORTModelForVision2Seq
 
+# TrOCR runs on CPU even when CUDA is available. Reasoning per dev/serving
+# commits (33deb6c, cb01fab): the autoregressive decode loop runs in PyTorch,
+# so an ORT-GPU encoder forces tensor transfers GPU↔CPU per generate() step,
+# which both negates the GPU benefit and triggers cuDNN errors on P100.
+# CPU encoder + use_io_binding=False is the proven-stable path.
 _htr_has_onnx = os.path.exists(os.path.join(HTR_DIR, "encoder_model.onnx"))
 if _htr_has_onnx:
     logger.info("HTR dir has pre-exported ONNX — loading directly from %s", HTR_DIR)
     trocr_model = ORTModelForVision2Seq.from_pretrained(
-        HTR_DIR, provider=providers[0],
+        HTR_DIR, provider="CPUExecutionProvider", use_io_binding=False,
     )
 else:
     logger.warning(
@@ -207,7 +212,8 @@ else:
         "optimum will auto-export to ONNX at load time (~1-3 min)", HTR_DIR,
     )
     trocr_model = ORTModelForVision2Seq.from_pretrained(
-        HTR_DIR, provider=providers[0], export=True,
+        HTR_DIR, provider="CPUExecutionProvider",
+        use_io_binding=False, export=True,
     )
 # NOTE: We use TrOCR's AutoProcessor for preprocessing (resize, normalize to
 # ImageNet stats, etc.) because our model expects that format.  Elnath's
@@ -464,7 +470,11 @@ async def predict_htr(req: HTRRequest) -> HTRResponse:
     # Start timing after image acquisition (measure inference only)
     t0 = time.perf_counter()
 
-    pixel_values = trocr_processor(images=image, return_tensors="pt").pixel_values
+    # Pass numpy RGB array (not PIL Image) — per dev/serving commit 83f565a,
+    # the processor's channel handling for the optimum-exported ONNX path
+    # mismatches when given PIL directly, producing wrong pixel values.
+    image_array = np.array(image.convert("RGB"))
+    pixel_values = trocr_processor(images=image_array, return_tensors="pt").pixel_values
 
     generated_ids = trocr_model.generate(
         pixel_values,
