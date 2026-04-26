@@ -369,7 +369,7 @@ services:
       HTR_MODEL_URI: "s3://paperless-datalake/warehouse/models/htr/production/"
       EMBEDDING_MODEL_URI: ""
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
       interval: 10s
       timeout: 3s
       retries: 12
