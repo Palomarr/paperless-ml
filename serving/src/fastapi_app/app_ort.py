@@ -8,6 +8,7 @@ import logging
 import math
 import os
 import time
+import uuid
 
 import numpy as np
 import onnxruntime as ort
@@ -82,6 +83,20 @@ if HTR_MODEL_URI:
     try:
         download_prefix_from_s3(HTR_MODEL_URI, HTR_DIR)
         logger.warning("HTR ONNX downloaded to %s", HTR_DIR)
+    except RuntimeError as e:
+        # Fresh-node fallback: production prefix is empty until first promote.
+        # download_prefix_from_s3 raises RuntimeError("no objects found ...")
+        # in that case. Fall back to stock HF model so ml-gateway boots cleanly
+        # on a fresh stack instead of crash-looping until Airflow promotes.
+        if "no objects found" in str(e):
+            logger.warning(
+                "HTR_MODEL_URI prefix is empty (fresh node, no promote yet) — "
+                "falling back to stock microsoft/trocr-small-handwritten",
+            )
+            HTR_DIR = "microsoft/trocr-small-handwritten"
+        else:
+            logger.error("HTR_MODEL_URI fetch failed: %s", e)
+            raise
     except Exception as e:
         logger.error("HTR_MODEL_URI fetch failed: %s", e)
         raise
@@ -168,12 +183,37 @@ trocr_processor = TrOCRProcessor.from_pretrained(
 # ---------------------------------------------------------------------------
 
 qdrant_client = None
+_qdrant_models = None
 try:
     from qdrant_client import QdrantClient
+    from qdrant_client import models as _qdrant_models
 
     qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=5)
 except Exception:
     logger.warning("qdrant-client not available; will use mock chunks or fallback")
+
+# Stable namespace for chunk point IDs — matches app.py so Qdrant points
+# upserted by either app.py or app_ort.py share the same UUID space.
+_CHUNK_ID_NAMESPACE = uuid.UUID("7b93c9e3-ff1f-4c8f-a3bf-ca3f1bf9a0e0")
+
+
+def _chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+    step = max(size - overlap, 1)
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        chunks.append(text[start:start + size])
+        start += step
+    return chunks
+
+
+def _point_id_for(document_id: str, chunk_idx: int) -> str:
+    return str(uuid.uuid5(_CHUNK_ID_NAMESPACE, f"{document_id}:{chunk_idx}"))
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -199,6 +239,20 @@ class HTRResponse(BaseModel):
     htr_output: str
     htr_confidence: float
     htr_flagged: bool
+    model_version: str
+    inference_time_ms: int
+
+
+class EncodeRequest(BaseModel):
+    document_id: str
+    text: str
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+
+class EncodeResponse(BaseModel):
+    document_id: str
+    chunks_indexed: int
     model_version: str
     inference_time_ms: int
 
@@ -273,10 +327,70 @@ if USE_MOCK_CHUNKS:
     chunk_embeddings: np.ndarray = _encode_texts(chunk_texts)
 
 # ---------------------------------------------------------------------------
+# Startup banner — pins each deployed run to an explicit model version in the
+# container logs. SAFEGUARDING.md §5 accountability mechanism.
+# ---------------------------------------------------------------------------
+print(
+    f"ml-gateway startup: HTR_MODEL_VERSION={HTR_MODEL_VERSION} "
+    f"RETRIEVAL_MODEL_VERSION={RETRIEVAL_MODEL_VERSION} "
+    f"HTR_CONFIDENCE_THRESHOLD={HTR_CONFIDENCE_THRESHOLD} "
+    f"SIMILARITY_THRESHOLD={SIMILARITY_THRESHOLD} "
+    f"device={device} backend=onnxruntime "
+    f"QDRANT={QDRANT_HOST}:{QDRANT_PORT} "
+    f"USE_MOCK_CHUNKS={USE_MOCK_CHUNKS} "
+    f"HTR_MODEL_URI={HTR_MODEL_URI or '<unset>'}",
+    flush=True,
+)
+
+# ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Paperless-ngx ML Serving (ORT)")
+
+
+# Prometheus metrics — exposes /metrics with default HTTP histograms,
+# plus custom collectors for HTR confidence/corrections and search
+# similarity/CTR. The four Counter pairs feed the rollback-trigger alerts
+# defined in ops/prometheus/alerts.yml.
+try:
+    from prometheus_client import Counter, Histogram
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    HTR_CONFIDENCE_HIST = Histogram(
+        "htr_confidence",
+        "TrOCR per-request confidence (geometric-mean of token probs)",
+        buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0),
+    )
+    SEARCH_SIMILARITY_HIST = Histogram(
+        "search_top_similarity",
+        "Top-1 cosine similarity score per /search/query call",
+        buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+    )
+    HTR_REQUESTS = Counter(
+        "htr_requests_total",
+        "Total /htr calls (denominator for correction-rate alert)",
+    )
+    HTR_CORRECTIONS = Counter(
+        "htr_corrections_total",
+        "HTR corrections recorded via ml_hooks feedback API",
+    )
+    SEARCH_QUERIES = Counter(
+        "search_queries_total",
+        "Total /search/query calls (denominator for CTR alert)",
+    )
+    SEARCH_CLICKS = Counter(
+        "search_clicks_total",
+        "Click events on search results reported via ml_hooks feedback API",
+    )
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+except Exception:
+    HTR_CONFIDENCE_HIST = None
+    SEARCH_SIMILARITY_HIST = None
+    HTR_REQUESTS = None
+    HTR_CORRECTIONS = None
+    SEARCH_QUERIES = None
+    SEARCH_CLICKS = None
 
 
 @app.get("/health")
@@ -289,8 +403,11 @@ async def health():
 # ---------------------------------------------------------------------------
 
 
-@app.post("/predict/htr", response_model=HTRResponse)
+@app.post("/htr", response_model=HTRResponse)
 async def predict_htr(req: HTRRequest) -> HTRResponse:
+    if HTR_REQUESTS is not None:
+        HTR_REQUESTS.inc()
+
     # Fetch image — try base64 fallback first, then S3
     if req.image_base64:
         image_bytes = base64.b64decode(req.image_base64)
@@ -331,6 +448,9 @@ async def predict_htr(req: HTRRequest) -> HTRResponse:
 
     avg_log_prob = sum(log_probs) / max(len(log_probs), 1)
     htr_confidence = round(math.exp(avg_log_prob), 4)
+
+    if HTR_CONFIDENCE_HIST is not None:
+        HTR_CONFIDENCE_HIST.observe(htr_confidence)
 
     inference_time_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -403,8 +523,11 @@ def _deduplicate_to_document(results: list[dict]) -> list[dict]:
     return sorted(best.values(), key=lambda x: x["similarity_score"], reverse=True)
 
 
-@app.post("/predict/search", response_model=SearchResponse)
+@app.post("/search/query", response_model=SearchResponse)
 async def predict_search(req: SearchRequest) -> SearchResponse:
+    if SEARCH_QUERIES is not None:
+        SEARCH_QUERIES.inc()
+
     t0 = time.perf_counter()
 
     query_embedding = _encode_texts([req.query_text])
@@ -434,8 +557,10 @@ async def predict_search(req: SearchRequest) -> SearchResponse:
     # Deduplicate to document level
     deduped = _deduplicate_to_document(raw_results)
 
-    # Check similarity threshold
+    # Check similarity threshold + observe top-1 score in Prometheus histogram
     top_score = deduped[0]["similarity_score"] if deduped else 0.0
+    if deduped and SEARCH_SIMILARITY_HIST is not None:
+        SEARCH_SIMILARITY_HIST.observe(top_score)
     if top_score < SIMILARITY_THRESHOLD:
         fallback_to_keyword = True
 
@@ -462,3 +587,89 @@ async def predict_search(req: SearchRequest) -> SearchResponse:
         model_version=RETRIEVAL_MODEL_VERSION,
         inference_time_ms=inference_time_ms,
     )
+
+
+# ---------------------------------------------------------------------------
+# Encode endpoint — index document chunks into Qdrant. Adapts the ORT
+# `_encode_texts` helper (mean pooling over the bi-encoder ONNX session)
+# in place of sentence-transformers' `.encode()` from app.py.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/search/encode", response_model=EncodeResponse)
+async def encode(req: EncodeRequest) -> EncodeResponse:
+    if qdrant_client is None or _qdrant_models is None:
+        raise HTTPException(status_code=503, detail="Qdrant unavailable")
+
+    t0 = time.perf_counter()
+
+    chunks = _chunk_text(req.text, req.chunk_size, req.chunk_overlap)
+    if not chunks:
+        raise HTTPException(status_code=422, detail="Empty text after stripping")
+
+    embeddings = _encode_texts(chunks)
+
+    # Remove existing chunks for this document so stale entries (from shorter
+    # future re-encodes) don't linger. Ignore errors — a fresh collection
+    # with no matching points just returns 0.
+    try:
+        qdrant_client.delete(
+            collection_name=QDRANT_COLLECTION,
+            points_selector=_qdrant_models.FilterSelector(
+                filter=_qdrant_models.Filter(
+                    must=[
+                        _qdrant_models.FieldCondition(
+                            key="document_id",
+                            match=_qdrant_models.MatchValue(value=req.document_id),
+                        )
+                    ]
+                )
+            ),
+        )
+    except Exception:
+        pass
+
+    points = [
+        _qdrant_models.PointStruct(
+            id=_point_id_for(req.document_id, idx),
+            vector=emb.tolist(),
+            payload={
+                "document_id": req.document_id,
+                "chunk_index": idx,
+                "chunk_text": chunks[idx],
+                "model_version": RETRIEVAL_MODEL_VERSION,
+            },
+        )
+        for idx, emb in enumerate(embeddings)
+    ]
+
+    qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=points)
+
+    return EncodeResponse(
+        document_id=req.document_id,
+        chunks_indexed=len(chunks),
+        model_version=RETRIEVAL_MODEL_VERSION,
+        inference_time_ms=int((time.perf_counter() - t0) * 1000),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internal metric-hook endpoints — fed by ml_hooks fire-and-forget POSTs
+# when a user submits an HTR correction or clicks a search result. Bumps
+# the rollback-trigger alert numerators (htr_corrections_total,
+# search_clicks_total).
+# ---------------------------------------------------------------------------
+
+
+@app.post("/metrics/correction-recorded")
+async def correction_recorded():
+    if HTR_CORRECTIONS is not None:
+        HTR_CORRECTIONS.inc()
+    return {"status": "ok"}
+
+
+@app.post("/metrics/click-recorded")
+async def click_recorded():
+    if SEARCH_CLICKS is not None:
+        SEARCH_CLICKS.inc()
+    return {"status": "ok"}
