@@ -104,11 +104,29 @@ up_airflow() {
 
 up_behavior_emulator() {
     info "Bringing up behavior_emulator (BE_MODE=${BE_MODE:-normal})"
-    info "  Note: emulator writes to data-stack postgres + calls /predict/search"
-    info "        If data-stack postgres isn't running, emulator will retry forever."
+    info "  Override: attaching to BOTH paperless_ml_net + paperless_data_default"
+    info "            (peer compose only joins paperless_ml_net; postgres is on the other)"
+    # Override compose: dual-network attach so behavior_emulator can reach
+    # both ml-gateway (on paperless_ml_net) and data-stack postgres (on
+    # paperless_data_default). Required because Elnath's compose only
+    # attaches to one network.
+    local override="/tmp/behavior_emulator.override.yml"
+    cat > "$override" <<'EOF'
+services:
+  behavior_emulator:
+    networks:
+      - paperless_ml_net
+      - paperless_data_default
+networks:
+  paperless_data_default:
+    external: true
+    name: paperless_data_default
+EOF
     cd "$PEER_INT_DIR"
     BE_MODE="${BE_MODE:-normal}" docker compose -p behavior_emulator \
-        -f behavior_emulator/compose.yml up -d --build
+        -f behavior_emulator/compose.yml \
+        -f "$override" \
+        up -d --build --force-recreate
     cd "$ROOT_DIR"
     sleep 5
     if docker ps --filter "name=behavior_emulator" --filter "status=running" -q | grep -q .; then
@@ -158,25 +176,46 @@ up_htr_consumer() {
         warn "  PAPERLESS_TOKEN=\$TOKEN bash $0 tier2"
         return 1
     fi
-    info "Bringing up htr_consumer (with HTR_ENDPOINT=/htr override for E1 routes)"
+    info "Bringing up htr_consumer (with HTR_ENDPOINT=/htr + MinIO cred override)"
+    # Override compose: peer compose hardcodes MinIO creds + old route name.
+    # Shell env-var injection won't override literal compose values, so we
+    # use a real override compose file.
+    local override="/tmp/htr_consumer.override.yml"
+    cat > "$override" <<'EOF'
+services:
+  htr_consumer:
+    environment:
+      HTR_ENDPOINT: /htr
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+EOF
     cd "$PEER_INT_DIR"
-    HTR_ENDPOINT=/htr \
-    MINIO_ACCESS_KEY=minioadmin \
-    MINIO_SECRET_KEY=minioadmin \
-    docker compose -p htr_consumer -f htr_consumer/compose.yml up -d --build
+    docker compose -p htr_consumer \
+        -f htr_consumer/compose.yml \
+        -f "$override" \
+        up -d --build --force-recreate
     cd "$ROOT_DIR"
     sleep 5
     ok "htr_consumer running (logs: docker logs -f htr_consumer)"
 }
 
 up_drift_monitor() {
-    info "Bringing up drift_monitor"
+    info "Bringing up drift_monitor (with MinIO cred override)"
     info "  Note: requires drift reference baked at warehouse/drift_reference/htr_v1/cd"
     info "        If reference missing, service will crash-loop until built."
+    local override="/tmp/drift_monitor.override.yml"
+    cat > "$override" <<'EOF'
+services:
+  drift_monitor:
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+EOF
     cd "$PEER_INT_DIR"
-    MINIO_ACCESS_KEY=minioadmin \
-    MINIO_SECRET_KEY=minioadmin \
-    docker compose -p drift_monitor -f drift_monitor/compose.yml up -d --build
+    docker compose -p drift_monitor \
+        -f drift_monitor/compose.yml \
+        -f "$override" \
+        up -d --build --force-recreate
     cd "$ROOT_DIR"
     sleep 10
     if curl -fsS "http://localhost:8200/health" >/dev/null 2>&1; then
@@ -242,10 +281,29 @@ case "${1:-}" in
     down)
         down_all
         ;;
+    fix)
+        # Re-apply overrides to existing peer components — useful when fixing
+        # network attach + cred mismatches without re-doing the long image builds.
+        preflight
+        info "Re-applying overrides to existing peer components"
+        up_behavior_emulator
+        if [[ -n "${PAPERLESS_TOKEN:-}" ]]; then
+            up_htr_consumer
+        else
+            warn "PAPERLESS_TOKEN not set — skipping htr_consumer recreate"
+        fi
+        up_drift_monitor
+        echo
+        info "Done. Verify with:"
+        echo "    docker logs --tail=20 behavior_emulator"
+        echo "    docker logs --tail=20 htr_consumer"
+        echo "    docker logs --tail=20 drift_monitor"
+        ;;
     *)
-        echo "Usage: $0 {tier1|tier2|down}"
+        echo "Usage: $0 {tier1|tier2|fix|down}"
         echo "  tier1   Training images + airflow + behavior_emulator (low-friction)"
         echo "  tier2   Data-stack postgres + htr_consumer + drift_monitor (needs prereqs)"
+        echo "  fix     Re-apply override compose files (for iterating after a fix)"
         echo "  down    Stop all peer components (leaves paperless_ml alone)"
         exit 1
         ;;

@@ -723,3 +723,27 @@ async def click_recorded():
     if SEARCH_CLICKS is not None:
         SEARCH_CLICKS.inc()
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compat aliases for peer components that hardcode the pre-E1 routes.
+#
+# The E1 port renamed /predict/htr → /htr and /predict/search → /search/query
+# to match the system-implementation contract. Some peer components
+# (Elnath's behavior_emulator search bot, older fixtures) still hardcode
+# the old paths. Rather than ask the team to patch their code mid-cycle,
+# we keep the old routes alive as thin delegates to the new handlers.
+#
+# This costs ~10 lines and zero runtime overhead; long-term the team can
+# migrate peer code to the canonical routes and remove these.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/predict/htr", response_model=HTRResponse)
+async def predict_htr_legacy(req: HTRRequest) -> HTRResponse:
+    return await predict_htr(req)
+
+
+@app.post("/predict/search", response_model=SearchResponse)
+async def predict_search_legacy(req: SearchRequest) -> SearchResponse:
+    return await predict_search(req)
