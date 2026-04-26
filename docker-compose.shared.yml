@@ -37,6 +37,9 @@ services:
       paperless_ml_net:
         aliases:
           - fastapi_server
+          - ml_gateway      # Elnath's peer components (htr_consumer, behavior_emulator,
+                            # drift_monitor) hardcode the underscore form. Without this
+                            # alias, their FASTAPI_URL / ML_GATEWAY_URL fail DNS lookup.
 
   # MLflow on the shared net so external training containers + Elnath's
   # drift_monitor can reach it via hostname `mlflow:5000` without going
