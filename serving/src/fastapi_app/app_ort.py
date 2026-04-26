@@ -162,6 +162,22 @@ biencoder_tokenizer = AutoTokenizer.from_pretrained(
     "sentence-transformers/all-mpnet-base-v2"
 )
 
+# Verify the ORT session actually selected the GPU provider, not fell back to
+# CPU silently. ort.get_available_providers() reports providers built into the
+# wheel; session.get_providers() reports what loaded successfully at runtime.
+# If they diverge, the device label in the startup banner is a lie.
+_actual_providers = biencoder_session.get_providers()
+if device == "cuda" and "CUDAExecutionProvider" not in _actual_providers:
+    logger.error(
+        "device=cuda was claimed but ORT silently fell back to CPU "
+        "(actual providers=%s). Inference will run on CPU. "
+        "Likely cause: onnxruntime-gpu wheel/CUDA version mismatch.",
+        _actual_providers,
+    )
+    device = "cpu (fallback)"
+else:
+    logger.warning("ORT bi-encoder providers=%s", _actual_providers)
+
 # TrOCR via optimum ORT wrapper. Supports two input layouts at HTR_DIR:
 #
 #   (fast path) HTR_DIR contains pre-exported ONNX files:

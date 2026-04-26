@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir \
     safetensors \
     Pillow \
     numpy \
-    onnxruntime-gpu \
+    "onnxruntime-gpu==1.17.1" \
     "optimum[onnxruntime-gpu]" \
     boto3 \
     minio \
