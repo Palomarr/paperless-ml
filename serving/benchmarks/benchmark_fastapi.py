@@ -66,12 +66,12 @@ async def warmup(base_url, htr_payload, search_payload, n=3):
     async with aiohttp.ClientSession() as session:
         for _ in range(n):
             try:
-                async with session.post(f"{base_url}/predict/htr", json=htr_payload) as r:
+                async with session.post(f"{base_url}/htr", json=htr_payload) as r:
                     await r.read()
             except Exception:
                 pass
             try:
-                async with session.post(f"{base_url}/predict/search", json=search_payload) as r:
+                async with session.post(f"{base_url}/search/query", json=search_payload) as r:
                     await r.read()
             except Exception:
                 pass
@@ -108,8 +108,8 @@ async def main(base_url, concurrency_levels, num_requests, use_s3, crop_s3_url):
     all_results = {"input_mode": input_mode}
 
     for endpoint, payload in [
-        ("/predict/htr", htr_payload),
-        ("/predict/search", search_payload),
+        ("/htr", htr_payload),
+        ("/search/query", search_payload),
     ]:
         url = f"{base_url}{endpoint}"
         print(f"\n{'='*60}")
