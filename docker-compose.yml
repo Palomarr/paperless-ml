@@ -312,7 +312,7 @@ services:
   ml-gateway:
     build:
       context: ./serving
-      dockerfile: dockerfiles/Dockerfile.fastapi
+      dockerfile: dockerfiles/Dockerfile.fastapi-ort
     restart: unless-stopped
     depends_on:
       qdrant:
