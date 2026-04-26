@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Verify the paperless-ngx + ml_hooks overlay integration end-to-end.
-# Runs 13 checkpoints against a locally-brought-up docker compose stack.
+# Runs 17 checkpoints against a locally-brought-up docker compose stack.
+# Checkpoints 14-17 are runtime-contract checks for ml-gateway (backend
+# label honesty, /htr direct call, required Prometheus series, ORT silent-
+# fallback detection); they validate ORT and PyTorch backends interchangeably.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -398,9 +401,109 @@ else
     exit 1
 fi
 
+# ---------- checkpoint 14: ml-gateway /health schema + device honesty ----------
+info "Checkpoint 14: ml-gateway /health schema + device label honesty"
+health_resp="$(curl -fsS http://localhost:8090/health 2>/dev/null || echo '{}')"
+device_field="$(echo "$health_resp" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("device","missing"))' 2>/dev/null || echo "")"
+backend_field="$(echo "$health_resp" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("backend","not_set"))' 2>/dev/null || echo "")"
+case "$device_field" in
+    cuda|cpu)
+        pass "/health device=$device_field backend=$backend_field"
+        ;;
+    *fallback*)
+        fail "/health reports device=$device_field — silent CPU fallback (ORT couldn't load CUDA at session creation)"
+        exit 1
+        ;;
+    *)
+        fail "/health device field unexpected: $device_field (full response: $health_resp)"
+        exit 1
+        ;;
+esac
+
+# ---------- checkpoint 15: direct /htr call exercises the TrOCR runtime ----------
+# Elnath's external htr_consumer is the usual /htr caller; without it, the
+# TrOCR runtime path goes untested even though /search/* exercises bi-encoder.
+# A 1×1 PNG is enough — we're checking the contract, not transcription quality.
+info "Checkpoint 15: POST /htr returns valid HTRResponse (TrOCR runtime live)"
+TINY_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+attempt=0
+htr_resp=""
+htr_model_version=""
+while (( attempt < 5 )); do
+    htr_resp="$(curl -fsS -m 30 -X POST http://localhost:8090/htr \
+        -H 'Content-Type: application/json' \
+        -d "{\"region_id\":\"verify-harness\",\"image_base64\":\"$TINY_PNG_B64\"}" 2>/dev/null || echo '')"
+    htr_model_version="$(echo "$htr_resp" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("model_version",""))' 2>/dev/null || echo "")"
+    if [[ -n "$htr_model_version" ]]; then
+        break
+    fi
+    sleep 3
+    attempt=$(( attempt + 1 ))
+done
+if [[ -n "$htr_model_version" ]]; then
+    pass "/htr 200 → model_version=$htr_model_version (TrOCR runtime serving)"
+else
+    fail "/htr did not return a valid HTRResponse after 5 attempts (last response: ${htr_resp:0:200})"
+    exit 1
+fi
+
+# ---------- checkpoint 16: alert-rule-required Prometheus series ----------
+# alerts.yml depends on specific metric NAMES being emitted. If a port renames
+# them (e.g. htr_request_count vs htr_requests_total), the alert rule silently
+# evaluates to NaN and the rollback chain breaks without warning.
+info "Checkpoint 16: ml-gateway /metrics emits all alert-rule-required series"
+metrics_out="$(curl -fsS http://localhost:8090/metrics 2>/dev/null || echo '')"
+REQUIRED_SERIES=(
+    "htr_requests_total"
+    "htr_corrections_total"
+    "htr_confidence_count"
+    "search_queries_total"
+    "search_clicks_total"
+    "search_top_similarity_count"
+    "http_request_duration_seconds_count"
+)
+missing=()
+for series in "${REQUIRED_SERIES[@]}"; do
+    if ! echo "$metrics_out" | grep -q "^${series}"; then
+        missing+=("$series")
+    fi
+done
+if (( ${#missing[@]} == 0 )); then
+    pass "All ${#REQUIRED_SERIES[@]} alert-rule-dependent series present in /metrics"
+else
+    fail "Missing series in /metrics (alert rules will silently break): ${missing[*]}"
+    exit 1
+fi
+
+# ---------- checkpoint 17: ORT silent-fallback detection (when backend=onnxruntime) ----------
+# ort.get_available_providers() reports providers compiled into the wheel;
+# the actual InferenceSession can fail to load CUDAExecutionProvider at runtime
+# and silently fall back to CPU. /metrics still works, /health still says cuda,
+# but inference is on CPU. Detect via log scan for the canary error patterns.
+if [[ "$backend_field" == "onnxruntime" ]]; then
+    info "Checkpoint 17: ORT loaded CUDAExecutionProvider successfully (no silent fallback)"
+    ml_logs="$(docker compose logs ml-gateway 2>&1 || echo '')"
+    if echo "$ml_logs" | grep -q "device=cuda was claimed but ORT silently fell back"; then
+        fail "ORT silent CPU fallback detected — ml-gateway labels device=cuda but is running on CPU"
+        echo "$ml_logs" | grep -E "providers=|fallback|cublasLt" | tail -5
+        exit 1
+    elif echo "$ml_logs" | grep -q "libcublasLt.so.12: cannot open"; then
+        fail "ORT CUDA provider failed to load (libcublasLt.so.12 missing — onnxruntime-gpu/CUDA version mismatch)"
+        echo "$ml_logs" | grep "libcublasLt" | tail -3
+        exit 1
+    elif echo "$ml_logs" | grep -q "ORT bi-encoder providers=\[.*CUDAExecutionProvider"; then
+        provider_line="$(echo "$ml_logs" | grep "ORT bi-encoder providers=" | tail -1 | sed 's/.*providers=//')"
+        pass "ORT bi-encoder using CUDAExecutionProvider — $provider_line"
+    else
+        warn "Could not confirm ORT CUDA load (no diagnostic log line found — check ml-gateway logs manually)"
+    fi
+else
+    info "Checkpoint 17: backend=$backend_field — skipping ORT-specific check (PyTorch baseline path)"
+fi
+
 # ---------- done ----------
 echo
-pass "All 13 checkpoints passed."
+pass "All 17 checkpoints passed."
 echo
 echo "Stack is still running. Browse: http://localhost:8000 (admin / admin)"
 echo "  Feedback UI:   http://localhost:8000/ml-ui/"
