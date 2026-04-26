@@ -132,6 +132,30 @@ else:
 # Model loading
 # ---------------------------------------------------------------------------
 
+# Fresh-node fallback: if the bi-encoder ONNX wasn't pre-baked into the image
+# AND EMBEDDING_MODEL_URI didn't fetch one, export from HF at first boot via
+# optimum. Mirrors the TrOCR fresh-node path. ~30s one-time on cold boot.
+if not os.path.exists(BIENCODER_PATH):
+    logger.warning(
+        "Bi-encoder ONNX missing at %s — exporting from HF stock "
+        "(sentence-transformers/all-mpnet-base-v2). One-time ~30s on first boot.",
+        BIENCODER_PATH,
+    )
+    os.makedirs(ONNX_DIR, exist_ok=True)
+    from optimum.onnxruntime import ORTModelForFeatureExtraction
+    _tmp = ORTModelForFeatureExtraction.from_pretrained(
+        "sentence-transformers/all-mpnet-base-v2",
+        export=True,
+        provider="CPUExecutionProvider",  # export step doesn't need GPU
+    )
+    _tmp.save_pretrained(ONNX_DIR)
+    # Optimum saves the exported file as model.onnx; rename to our convention.
+    src = os.path.join(ONNX_DIR, "model.onnx")
+    if os.path.exists(src) and src != BIENCODER_PATH:
+        os.rename(src, BIENCODER_PATH)
+    del _tmp  # release memory before re-loading via low-level ORT
+    logger.warning("Bi-encoder ONNX exported to %s", BIENCODER_PATH)
+
 # mpnet bi-encoder via ORT
 biencoder_session = ort.InferenceSession(BIENCODER_PATH, providers=providers)
 biencoder_tokenizer = AutoTokenizer.from_pretrained(
