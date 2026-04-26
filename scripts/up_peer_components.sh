@@ -150,6 +150,14 @@ up_data_stack_postgres() {
     while (( elapsed < 60 )); do
         if docker exec postgres pg_isready -U user -d paperless >/dev/null 2>&1; then
             ok "data-stack postgres ready (named: postgres, network: paperless_data_default)"
+            # Also attach to paperless_ml_net so Airflow-spawned task containers
+            # (htr_batch via DockerOperator) can reach postgres by name. Without
+            # this, build_snapshot fails with "could not translate host name 'postgres'".
+            if ! docker inspect postgres --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
+                    | grep -q paperless_ml_net; then
+                docker network connect paperless_ml_net postgres 2>&1 | sed 's/^/    /' || true
+                ok "postgres attached to paperless_ml_net (so Airflow tasks can reach it)"
+            fi
             return 0
         fi
         sleep 3
