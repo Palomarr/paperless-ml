@@ -80,14 +80,19 @@ else
 fi
 
 # ---- Layer 3: ml-gateway /models/ contents (presence check, not real-vs-stock) ----
+# /models/ population differs by path: fine-tuned TrOCR fetched from MinIO
+# lands as /models/htr_onnx/{encoder,decoder}_model.onnx; stock-fallback
+# TrOCR lives only in optimum's HF cache (not /models/). Bi-encoder always
+# lands at /models/biencoder.onnx in either path. So either filename is
+# evidence the runtime is serving.
 info "Layer 3: ml-gateway container /models/ contents"
-models_listing="$(docker compose exec -T ml-gateway ls -la /models/ 2>/dev/null || echo '')"
-if echo "$models_listing" | grep -q "encoder_model.onnx"; then
-    real "ml-gateway has loaded model files (real or stock-exported)"
-    echo "$models_listing" | head -15 | sed 's/^/    /'
+models_listing="$(docker compose exec -T ml-gateway ls -laR /models/ 2>/dev/null || echo '')"
+if echo "$models_listing" | grep -qE "(encoder_model\.onnx|biencoder\.onnx)"; then
+    real "ml-gateway has loaded ONNX file(s) (real or stock-exported)"
+    echo "$models_listing" | head -20 | sed 's/^/    /'
     VERDICT[L3]="present"
 else
-    miss "/models/ missing expected ONNX files — ml-gateway not serving"
+    miss "/models/ has no ONNX files — ml-gateway not serving"
     VERDICT[L3]="missing"
 fi
 
