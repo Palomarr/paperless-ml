@@ -30,7 +30,7 @@ services:
       interval: 10s
       timeout: 2s
       retries: 30
-      start_period: 90s
+      start_period: 300s     # postgres init can take minutes on contended disks
 
   # Observability: Prometheus scrapes ml-gateway + qdrant /metrics endpoints.
   # Config at ops/prometheus/prometheus.yml.
