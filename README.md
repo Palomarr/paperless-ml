@@ -68,6 +68,22 @@ Eight tiers, one compose file:
 
 ---
 
+## Bonus items integrated from the initial implementation
+
+The Apr 6 initial implementation submission ranked nine serving configurations (`initial implementation/serving_table.pdf`). Two bonus items are integrated into the deployed system implementation here, with one architectural revision documented honestly:
+
+| Item | Initial proposal | Deployed reality | Status |
+|---|---|---|---|
+| **E1** — ONNX Runtime serving | `ort_fp32_gpu` (all-on-GPU, 149/153ms HTR p50/p95) | `ort_fp32_split_p100` (bi-encoder ORT-GPU + TrOCR PyTorch-CPU, 173/187ms) | ✅ integrated, with documented divergence |
+| **E2** — GPU acceleration | mpnet bi-encoder on `CUDAExecutionProvider` | Same — bi-encoder runs on `CUDAExecutionProvider`; TrOCR on CPU per E1 split | ✅ integrated |
+| **E3** — deployed-stack benchmark | (proposal table only, no live measurement) | `serving_options.csv` row `ort_fp32_split_p100_deployed` measured against the live system-impl stack | ✅ integrated |
+
+**Why TrOCR runs on CPU instead of the proposed GPU**: the autoregressive `generate()` decode loop runs in PyTorch; forcing the encoder onto ONNX-GPU forces tensor transfers GPU↔CPU at every decode step (negates the speedup) and triggered cuDNN compute-capability errors specific to the P100 + ORT 1.17 + CUDA 11.8 + cuDNN 8 combination. Debugged across six commits on the [`dev/serving` branch](../../tree/dev/serving): `13a7541` (install order), `0b334f5` (provider override), `df811db` (numpy<2 pin), `5423d22` (PyTorch cu118 build), `33deb6c` (force `use_io_binding=False`), `cb01fab` (CPU PyTorch baseline). The fix integrated into `paperless-integration` via `Dockerfile.fastapi-ort` + `serving/src/fastapi_app/app_ort.py` (commit `fc638a9`).
+
+**Operational impact**: design load is ~150 docs/day (~0.005 RPS sustained); deployed throughput ceiling is 5.75 RPS HTR — three orders of magnitude over design load, so the 16% HTR latency regression vs the all-on-GPU proposal is operationally invisible. Benchmark methodology + measurements at [`serving/benchmarks/serving_options.csv`](serving/benchmarks/serving_options.csv).
+
+---
+
 ## Key design documents
 
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — node provisioning, one-command bring-up, teardown, Path A cross-stack bring-up
