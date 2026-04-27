@@ -167,6 +167,11 @@ services:
       # Patched consumer.py bind-mount: kafka tuning env-var support.
       # Survives even if upstream PR doesn't merge before freeze.
       - ./scripts/peer_patches/htr_consumer.py:/app/consumer.py:ro
+      # Patched db.py bind-mount: G5 — delete_existing_pages_and_regions
+      # pre-checks for user corrections and raises ReprocessSkipped instead
+      # of letting the FK violation surface as an alarming traceback. Keeps
+      # logs honest about real vs expected-on-redelivery errors.
+      - ./scripts/peer_patches/htr_consumer_db.py:/app/db.py:ro
     entrypoint: >
       /bin/sh -c "
       export PAPERLESS_TOKEN=$$(cat /secrets/token);
