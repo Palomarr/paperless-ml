@@ -197,8 +197,10 @@ services:
   # ── Behavior emulator ──────────────────────────────────────────────────
   behavior_emulator:
     build:
-      context: ${PEER_INT_DIR:-../paperless_data_integration}
-      dockerfile: behavior_emulator/Dockerfile
+      # Upstream compose uses `context: .` → behavior_emulator/ as build root;
+      # mirror that here so its `COPY requirements.txt .` resolves correctly.
+      context: ${PEER_INT_DIR:-../paperless_data_integration}/behavior_emulator
+      dockerfile: Dockerfile
     container_name: behavior_emulator
     depends_on:
       data-stack-postgres:
