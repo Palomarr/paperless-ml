@@ -62,13 +62,21 @@ class MlHooksConfig(AppConfig):
                 name="ml_global_search",
             ),
         )
-        # 3. /ml-ui/* — DEPRECATED. Kept as a redirect to /ml/htr-review for
-        #    any old links (FAB middleware, README references). The full
-        #    feedback UI is now provided by REDES01/paperless-ngx@dev's
-        #    paperless_ml app (Angular sidebar tabs at /ml/htr-review and
-        #    /ml/search). The Django template UI here was a strict subset —
-        #    every feature is covered (and richer) by the sidebar UI.
+        # 3. /ml-ui/* — DEPRECATED. Redirects to the Angular sidebar tabs
+        #    added by REDES01/paperless-ngx@dev's paperless_ml frontend. The
+        #    Django template UI here was a strict subset — every feature is
+        #    covered (and richer) by the sidebar UI: region-level corrections,
+        #    confidence color-coding, crop preview, opt-in toggle, search
+        #    mode selector, model_version display.
         from django.views.generic import RedirectView
+        paperless_urls.urlpatterns.insert(
+            0,
+            re_path(
+                r"^ml-ui/search/?$",
+                RedirectView.as_view(url="/ml/search", permanent=True),
+                name="ml_ui_search_deprecated",
+            ),
+        )
         paperless_urls.urlpatterns.insert(
             0,
             re_path(
