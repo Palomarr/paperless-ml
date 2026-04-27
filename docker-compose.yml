@@ -531,8 +531,16 @@ services:
       timeout: 3s
       retries: 20
 
+  # Paperless-ngx fork (Elnath, REDES01/paperless-ngx@dev) with the
+  # paperless_ml Django app + Angular sidebar tabs (HTR Review +
+  # Semantic Search) baked in. Our ml_counters overlay rides alongside as
+  # a Django middleware that fires ml-gateway counter increments after
+  # successful POSTs to /api/ml/htr/corrections/ and /api/ml/search/feedback/
+  # — that's the seam that keeps HtrCorrectionRateHigh + SearchCTRLow
+  # alerts firing despite feedback now landing in the data-stack postgres
+  # (not Paperless's own DB) via paperless_ml.views.
   paperless-web:
-    image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+    image: ghcr.io/redes01/paperless-ngx-ml:latest
     restart: unless-stopped
     depends_on:
       postgres:
@@ -544,8 +552,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      PAPERLESS_APPS: "ml_hooks"
+      # Load our counter-forwarder app alongside the baked-in paperless_ml.
+      PAPERLESS_APPS: "ml_counters"
       PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
+
+      # Paperless's own datastores (unchanged).
       PAPERLESS_REDIS: "redis://redis:6379"
       PAPERLESS_DBENGINE: postgresql
       PAPERLESS_DBHOST: postgres
@@ -558,19 +569,50 @@ services:
       PAPERLESS_ADMIN_USER: admin
       PAPERLESS_ADMIN_PASSWORD: admin
       PAPERLESS_URL: "http://localhost:8000"
-      ML_GATEWAY_URL: "http://ml-gateway:8000"
-      ML_GATEWAY_TIMEOUT: "30"
       REDPANDA_PROXY_URL: "http://redpanda:8082"
-      # Warehouse bucket for feedback-archival exports. Read by future
-      # retraining pipelines; see docs/DEPLOYMENT.md §10.
       WAREHOUSE_BUCKET: paperless-datalake
       WAREHOUSE_PREFIX: warehouse
+
+      # Elnath's paperless_ml app reads/writes the data-stack postgres
+      # (htr_corrections, search_feedback, query_sessions schemas). The
+      # `postgres` hostname resolves on the paperless_data_default network
+      # we attach below. Falls back to our local postgres if that network
+      # isn't up — paperless_ml's views return 503 cleanly in that case.
+      PAPERLESS_ML_DBHOST: postgres
+      PAPERLESS_ML_DBPORT: "5432"
+      PAPERLESS_ML_DBNAME: paperless
+      PAPERLESS_ML_DBUSER: user
+      PAPERLESS_ML_DBPASSWORD: paperless_postgres
+
+      # Where his Angular components proxy /ml-api/<path> → our ml-gateway.
+      # Our app_ort.py keeps legacy /predict/htr + /predict/search aliases
+      # so this works without a route rewrite on his side (commit c055e87).
+      PAPERLESS_ML_SERVING_URL: "http://ml-gateway:8000"
+
+      # His producer.py publishes uploads to our shared Redpanda.
+      PAPERLESS_ML_KAFKA_BROKER: "redpanda:9092"
+      PAPERLESS_ML_KAFKA_TOPIC: "paperless.uploads"
+
+      # His signal handlers clean up Qdrant on document delete.
+      PAPERLESS_ML_QDRANT_HOST: "qdrant"
+      PAPERLESS_ML_QDRANT_PORT: "6333"
+      PAPERLESS_ML_QDRANT_COLLECTION: "document_chunks"
+
+      # Our middleware (ml_counters.middleware.CounterForwarderMiddleware)
+      # forwards successful POSTs to ml-gateway counter endpoints.
+      ML_COUNTERS_GATEWAY_URL: "http://ml-gateway:8000"
     volumes:
       - ./paperless_patches:/usr/src/paperless/patches
       - paperless_data:/usr/src/paperless/data
       - paperless_media:/usr/src/paperless/media
       - paperless_consume:/usr/src/paperless/consume
       - paperless_export:/usr/src/paperless/export
+    networks:
+      # paperless_ml_net for ml-gateway/qdrant/redpanda; paperless_data_default
+      # for the data-stack postgres that paperless_ml's views write to.
+      - default
+      - paperless_ml_net
+      - paperless_data_default
 
 volumes:
   pg_data:
@@ -594,3 +636,11 @@ networks:
   paperless_ml_net:
     name: paperless_ml_net
     driver: bridge
+  # Data-stack network owned by REDES01/paperless_data's compose. Declared
+  # external here because paperless-web needs to reach the data-stack
+  # postgres (htr_corrections, search_feedback) that Elnath's paperless_ml
+  # views write to. The data stack is brought up by up_peer_components.sh
+  # tier2; if that hasn't happened, attach fails non-fatally and his views
+  # return 503 cleanly (we fall back to displaying empty queues).
+  paperless_data_default:
+    external: true
