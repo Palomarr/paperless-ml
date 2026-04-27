@@ -373,7 +373,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 12
-      start_period: 90s      # first boot loads TrOCR + mpnet into memory
+      start_period: 300s     # first boot: HF model download + ONNX export + load — 5min cap covers slow disks
 
   # One-shot: create the 'mlflow' database inside our shared postgres.
   # Postgres only runs /docker-entrypoint-initdb.d/*.sql on first boot,
