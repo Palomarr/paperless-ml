@@ -44,12 +44,18 @@ services:
   # `host=postgres` for the data stack is patched via bind-mount overlays
   # in scripts/peer_patches/airflow_dags/.
   data-stack-postgres:
-    image: postgres:16
+    # postgres:16-alpine is significantly leaner than postgres:16 — faster
+    # initdb on contended Chameleon disks where multiple containers
+    # initialize simultaneously. POSTGRES_INITDB_ARGS=--no-sync skips the
+    # final fsync, dropping initdb from minutes to seconds. Acceptable for
+    # this dev/integration role; production would keep fsync.
+    image: postgres:16-alpine
     container_name: data-stack-postgres
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: paperless_postgres
       POSTGRES_DB: paperless
+      POSTGRES_INITDB_ARGS: "--no-sync"
     volumes:
       - data_stack_pg_data:/var/lib/postgresql/data
       # Init SQL files create htr_corrections, search_feedback,
@@ -245,6 +251,24 @@ services:
       - ./scripts/peer_patches/airflow_dags/htr_training.py:/opt/airflow/dags/htr_training.py:ro
       - ./scripts/peer_patches/airflow_dags/archive_corrections.py:/opt/airflow/dags/archive_corrections.py:ro
       - ./scripts/peer_patches/airflow_dags/search_feedback_rerank.py:/opt/airflow/dags/search_feedback_rerank.py:ro
+
+  # Override airflow-postgres to use the alpine image + skip fsync during
+  # initdb. Same reasoning as data-stack-postgres above.
+  airflow-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      POSTGRES_INITDB_ARGS: "--no-sync"
+    healthcheck:
+      # Bump start_period so a slow first-init disk doesn't trip the
+      # unhealthy state before initdb finishes.
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 120s
 
 networks:
   # Re-declare paperless_ml_net here (after airflow's compose in the -f list)
