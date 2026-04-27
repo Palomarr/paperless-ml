@@ -1,0 +1,230 @@
+# ===========================================================================
+# Peer-component overlay — folds Elnath's data-stack postgres, htr_consumer,
+# drift_monitor, and behavior_emulator into a single docker compose
+# invocation alongside our docker-compose.yml. Replaces the previous
+# scripts/up_peer_components.sh tier1+tier2 dance.
+#
+# Brings up:
+#   - data-stack-postgres   ML schema (htr_corrections, search_feedback,
+#                           query_sessions, handwritten_regions, ...) — runs
+#                           his init_sql/ on first boot. SEPARATE from
+#                           paperless-web's own postgres ('postgres' service
+#                           in docker-compose.yml).
+#   - paperless-token-init  one-shot extracts admin DRF token, writes to a
+#                           shared volume; htr_consumer reads from it on
+#                           startup. Replaces the get_paperless_token.sh
+#                           manual extraction.
+#   - htr_consumer          builds from $PEER_INT_DIR with our patched
+#                           consumer.py (kafka tuning) bind-mounted on top.
+#   - drift_monitor         scrape target + MMD detector; uses our MinIO
+#                           creds.
+#   - behavior_emulator     synthetic feedback bot; writes to data-stack
+#                           postgres + hits ml-gateway.
+#
+# Airflow lives in a separate compose file at $PEER_INT_DIR/airflow/compose.yml
+# and is brought up alongside via the -f flag.
+#
+# Usage (full integrated bring-up):
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.shared.yml \
+#     -f docker-compose.peer.yml \
+#     -f ${PEER_INT_DIR}/airflow/compose.yml \
+#     up -d
+#
+# chameleon_setup.sh wraps this; no separate up_peer_components.sh needed.
+# ===========================================================================
+
+services:
+  # ── Data-stack postgres ────────────────────────────────────────────────
+  # Separate postgres instance for Elnath's ML schema. Container name is
+  # 'postgres-data-stack' to avoid colliding with our 'postgres' service.
+  # Peer code that hardcodes host=postgres still works via airflow DAG env
+  # overrides set in docker-compose.shared.yml + the ML_DB_HOST env we set
+  # on htr_consumer below.
+  data-stack-postgres:
+    image: postgres:16
+    container_name: postgres-data-stack
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: paperless_postgres
+      POSTGRES_DB: paperless
+    volumes:
+      - data_stack_pg_data:/var/lib/postgresql/data
+      # Init SQL files create htr_corrections, search_feedback,
+      # query_sessions, handwritten_regions, document_pages, documents
+      # tables on first boot. Path is relative to wherever docker compose
+      # is invoked; chameleon_setup.sh sets PEER_DATA_DIR appropriately.
+      - ${PEER_DATA_DIR:-../paperless_data}/docker/init_sql:/docker-entrypoint-initdb.d:ro
+    networks:
+      paperless_ml_net:
+        # Network alias so peer code that hardcodes host=postgres (e.g.
+        # airflow's _DATA_STACK_ENV in htr_training.py DB_DSN, drift_monitor)
+        # resolves to this container instead of our paperless 'postgres'.
+        # Our paperless-web sets PAPERLESS_DBHOST=paperless-postgres-alias
+        # via docker-compose.yml service_aliases below.
+        aliases: [postgres]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d paperless"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── Paperless DRF token bootstrap ──────────────────────────────────────
+  # One-shot: waits for paperless-web healthy, calls into Django to fetch
+  # (or create) the admin user's DRF auth token, writes it to a shared
+  # tmpfs volume. htr_consumer reads from there on startup. Replaces the
+  # manual `bash scripts/get_paperless_token.sh` step.
+  paperless-token-init:
+    image: ghcr.io/redes01/paperless-ngx-ml:latest
+    depends_on:
+      paperless-web:
+        condition: service_healthy
+    volumes:
+      - paperless_token:/shared
+    environment:
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: paperless
+      PAPERLESS_REDIS: "redis://redis:6379"
+      PAPERLESS_SECRET_KEY: "dev-only-insecure-key-do-not-ship"
+    command: >
+      /bin/sh -c "
+      python /usr/src/paperless/src/manage.py shell -c '
+      from rest_framework.authtoken.models import Token;
+      from django.contrib.auth import get_user_model;
+      u = get_user_model().objects.get(username=\"admin\");
+      t,_ = Token.objects.get_or_create(user=u);
+      open(\"/shared/token\", \"w\").write(t.key);
+      print(\"paperless-token-init: wrote\", len(t.key), \"char token\")
+      '
+      "
+    restart: "no"
+    networks:
+      - paperless_ml_net
+
+  # ── HTR consumer ───────────────────────────────────────────────────────
+  # Kafka consumer that processes paperless.uploads events: slices regions,
+  # uploads crops to MinIO, calls ml-gateway /htr, writes results to
+  # data-stack postgres.
+  htr_consumer:
+    build:
+      context: ${PEER_INT_DIR:-../paperless_data_integration}
+      dockerfile: htr_consumer/Dockerfile
+    container_name: htr_consumer
+    depends_on:
+      paperless-token-init:
+        condition: service_completed_successfully
+      data-stack-postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+      ml-gateway:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER: redpanda:9092
+      KAFKA_TOPIC: paperless.uploads
+      KAFKA_GROUP_ID: htr-preprocessing
+      # Long documents (e.g. 241-page books, 412s processing) trigger
+      # consumer rebalance under kafka-python defaults (300s poll interval,
+      # 500 records). Our patched consumer.py bind-mounted below reads these
+      # env vars to bump the limits. Upstream PR: REDES01/paperless_data_integration#fix-kafka-tuning-env-driven.
+      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+      KAFKA_MAX_POLL_RECORDS: "1"
+
+      # Our ml-gateway uses /htr (post-E1 rename); legacy /predict/htr alias
+      # also works in app_ort.py (commit c055e87).
+      FASTAPI_URL: http://ml-gateway:8000
+      HTR_ENDPOINT: /htr
+
+      PAPERLESS_URL: http://paperless-web:8000
+      # PAPERLESS_TOKEN injected by entrypoint from /secrets/token below.
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: paperless-images
+
+      # Data-stack postgres (this file). 'postgres' alias on paperless_ml_net
+      # resolves to data-stack-postgres container (see networks block above).
+      ML_DB_HOST: postgres
+      ML_DB_PORT: "5432"
+      ML_DB_NAME: paperless
+      ML_DB_USER: user
+      ML_DB_PASSWORD: paperless_postgres
+
+      DRIFT_MONITOR_URL: http://drift_monitor:8000
+      DRIFT_MONITOR_TIMEOUT_SECONDS: "2.0"
+
+      LOG_LEVEL: INFO
+    volumes:
+      # Shared with paperless-token-init.
+      - paperless_token:/secrets:ro
+      # Patched consumer.py bind-mount: kafka tuning env-var support.
+      # Survives even if upstream PR doesn't merge before freeze.
+      - ./scripts/peer_patches/htr_consumer.py:/app/consumer.py:ro
+    entrypoint: >
+      /bin/sh -c "
+      export PAPERLESS_TOKEN=$$(cat /secrets/token);
+      exec python -u /app/consumer.py
+      "
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
+  # ── Drift monitor ──────────────────────────────────────────────────────
+  drift_monitor:
+    build:
+      context: ${PEER_INT_DIR:-../paperless_data_integration}
+      dockerfile: drift_monitor/Dockerfile
+    container_name: drift_monitor
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      DRIFT_REF_BUCKET: paperless-datalake
+      DRIFT_REF_PREFIX: warehouse/drift_reference/htr_v1/cd
+      DRIFT_CROP_HEIGHT: "64"
+      DRIFT_CROP_WIDTH: "512"
+      DRIFT_RETRY_SECONDS: "60"
+      LOG_LEVEL: INFO
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
+      interval: 15s
+      start_period: 60s
+
+  # ── Behavior emulator ──────────────────────────────────────────────────
+  behavior_emulator:
+    build:
+      context: ${PEER_INT_DIR:-../paperless_data_integration}
+      dockerfile: behavior_emulator/Dockerfile
+    container_name: behavior_emulator
+    depends_on:
+      data-stack-postgres:
+        condition: service_healthy
+      paperless-web:
+        condition: service_healthy
+      ml-gateway:
+        condition: service_healthy
+    environment:
+      BE_MODE: ${BE_MODE:-normal}
+      # Data-stack postgres (writes query_sessions + search_feedback rows).
+      DB_DSN: host=postgres port=5432 dbname=paperless user=user password=paperless_postgres
+      ML_GATEWAY_URL: http://ml-gateway:8000
+      # ml-gateway has /htr + /search/query (post-E1) and legacy
+      # /predict/htr + /predict/search aliases (commit c055e87).
+      SEARCH_ENDPOINT: /predict/search
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
+volumes:
+  data_stack_pg_data:
+  paperless_token:

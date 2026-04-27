@@ -58,7 +58,7 @@ fail()  { printf "%s ✗ %s %s\n"   "$C_RED"    "$C_RESET" "$*"; exit 1; }
 # ===========================================================================
 # Step 1 — system packages + Docker Engine
 # ===========================================================================
-log "Step 1/7: Installing system packages and Docker Engine"
+log "Step 1/6: Installing system packages and Docker Engine"
 
 if ! command -v docker >/dev/null 2>&1; then
     sudo apt-get update -qq
@@ -78,7 +78,7 @@ sudo usermod -aG docker "$USER"
 # ===========================================================================
 # Step 2 — NVIDIA Container Toolkit (GPU support for Docker)
 # ===========================================================================
-log "Step 2/7: Installing NVIDIA Container Toolkit"
+log "Step 2/6: Installing NVIDIA Container Toolkit"
 
 if ! dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'; then
     curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
@@ -107,9 +107,9 @@ fi
 # Step 3 — Clone peer repos as siblings
 # ===========================================================================
 if (( SKIP_PEERS )); then
-    log "Step 3/7: Skipping peer-repo clone (--skip-peers)"
+    log "Step 3/6: Skipping peer-repo clone (--skip-peers)"
 else
-    log "Step 3/7: Cloning peer repos into ${PROJECT_PARENT}/"
+    log "Step 3/6: Cloning peer repos into ${PROJECT_PARENT}/"
 
     clone_if_missing() {
         local url="$1" dst="$2"
@@ -141,78 +141,95 @@ else
 fi
 
 # ===========================================================================
-# Step 4 — docker compose up (our stack with shared-network overlay).
-# The paperless_ml_net bridge is declared in docker-compose.yml and
-# self-creates on first boot — no explicit network-create step needed.
+# Helper: build htr_batch image with our patched batch_htr.py overlaid (mc init
+# order + corrected_at fixes; PR upstream pending). DockerOperator can't
+# bind-mount at task-spawn time, so the patch has to be baked into the
+# image. Mirrors scripts/peer_patches/htr_consumer.py runtime bind-mount.
 # ===========================================================================
-log "Step 4/7: Bringing up our stack (services + Path A overlay)"
+build_htr_batch_image() {
+    local TMP_BATCH_CTX
+    TMP_BATCH_CTX="$(mktemp -d)"
+    cp -r "${PROJECT_PARENT}/paperless_data/batch_pipeline/." "$TMP_BATCH_CTX/"
+    cp "${REPO_ROOT}/scripts/peer_patches/batch_htr.py" "$TMP_BATCH_CTX/batch_htr.py"
+    sg docker -c "docker build -t htr_batch:latest $TMP_BATCH_CTX" >/dev/null
+    rm -rf "$TMP_BATCH_CTX"
+}
+
+# Compose-files list assembled once and reused. PEER_INT_DIR / PEER_DATA_DIR
+# come from --skip-peers gating below; when peers aren't cloned, fall back
+# to our two stack files only.
+COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.shared.yml)
+if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
+    export PEER_INT_DIR="${PROJECT_PARENT}/paperless_data_integration"
+    export PEER_DATA_DIR="${PROJECT_PARENT}/paperless_data"
+    COMPOSE_FILES+=(-f docker-compose.peer.yml)
+    COMPOSE_FILES+=(-f "${PEER_INT_DIR}/airflow/compose.yml")
+fi
+
+# ===========================================================================
+# Step 4 — Pre-build images that aren't `image:` pulls and need patching.
+# ===========================================================================
+log "Step 4/6: Pre-building patched peer images (htr_batch, htr_trainer)"
+if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
+    build_htr_batch_image
+    ok "htr_batch:latest built (with batch_htr.py patches)"
+    sg docker -c "docker compose -p training -f \"${PEER_INT_DIR}/training/compose.yml\" build" >/dev/null
+    ok "htr_trainer:latest built"
+else
+    log "  (peer components disabled — skipping)"
+fi
+
+# ===========================================================================
+# Step 5 — Single multi-file `docker compose up -d` brings up the entire
+# integrated system: our 17 services + Elnath's data-stack postgres +
+# htr_consumer + drift_monitor + behavior_emulator + airflow (4 services)
+# + paperless-token-init bootstrap. No follow-up scripts needed.
+# ===========================================================================
+log "Step 5/6: Bringing up the integrated stack via single docker compose up"
+log "    files: ${COMPOSE_FILES[*]}"
 
 cd "$REPO_ROOT"
-sg docker -c "docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d"
+sg docker -c "docker compose ${COMPOSE_FILES[*]} up -d"
 
 # Wait for ml-gateway (longest cold-start — TrOCR + mpnet first-time load).
 log "    Waiting for ml-gateway /health (up to 240s; model download on first boot)"
 ATTEMPTS=0
-until sg docker -c "docker compose exec -T ml-gateway curl -fsS http://localhost:8000/health" \
+until sg docker -c "docker compose ${COMPOSE_FILES[*]} exec -T ml-gateway curl -fsS http://localhost:8000/health" \
         >/dev/null 2>&1; do
     ATTEMPTS=$((ATTEMPTS + 1))
     if (( ATTEMPTS > 40 )); then
         warn "ml-gateway did not become healthy in 240s. Check:"
-        warn "  docker compose logs --tail=100 ml-gateway"
+        warn "  docker compose ${COMPOSE_FILES[*]} logs --tail=100 ml-gateway"
         break
     fi
     sleep 6
 done
 (( ATTEMPTS <= 40 )) && ok "ml-gateway healthy"
 
-# ===========================================================================
-# Step 6 — Extract Paperless API token for the admin user.
-# Needed by Elnath's data_generator (token auth). Idempotent. 
-# See scripts/get_paperless_token.sh.
-# ===========================================================================
-log "Step 5/7: Extracting Paperless API token for admin"
-PAPERLESS_TOKEN="$(sg docker -c "bash ${REPO_ROOT}/scripts/get_paperless_token.sh" 2>/dev/null | tr -d '\r' | tail -n 1)"
-if [[ -z "$PAPERLESS_TOKEN" || "${#PAPERLESS_TOKEN}" -lt 20 ]]; then
-    warn "Token extraction returned unexpected output. Retry manually with:"
-    warn "  bash scripts/get_paperless_token.sh"
-    PAPERLESS_TOKEN=""
-else
-    ok "Paperless API token extracted (${#PAPERLESS_TOKEN}-char token)"
+# Token-init runs as a one-shot service in the compose file above; it
+# extracts the admin DRF token to a shared volume that htr_consumer reads.
+# We don't need to extract it again here — but probe its log for the
+# expected output so the operator sees confirmation.
+PAPERLESS_TOKEN=""
+if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
+    log "    Waiting for paperless-token-init to write the DRF token..."
+    for _ in $(seq 1 30); do
+        if sg docker -c "docker compose ${COMPOSE_FILES[*]} logs paperless-token-init 2>/dev/null" \
+            | grep -q "wrote .* char token"; then
+            ok "paperless-token-init wrote token; htr_consumer can now authenticate"
+            break
+        fi
+        sleep 4
+    done
 fi
 
 # ===========================================================================
-# Step 6 — Bring up peer components (Elnath's data-pipeline + retraining stack)
-# Folds htr_consumer, drift_monitor, behavior_emulator, airflow, and the
-# paperless-training image into the same bootstrap so the integrated system
-# comes up in one command (per system-impl rubric: "no SSH-based intervention
-# beyond a single bootstrap"). Skipped if --skip-peer-components or peer repos
-# weren't cloned.
-# ===========================================================================
-if (( SKIP_PEER_COMPONENTS )); then
-    log "Step 6/7: Skipping peer components (--skip-peer-components)"
-elif (( SKIP_PEERS )); then
-    log "Step 6/7: Skipping peer components (peer repos not cloned)"
-else
-    log "Step 6/7: Bringing up peer components (htr_consumer, drift_monitor, behavior_emulator, airflow)"
-    sg docker -c "bash ${REPO_ROOT}/scripts/up_peer_components.sh tier1"
-    # tier2 needs PAPERLESS_TOKEN to wire htr_consumer's auth header.
-    if [[ -n "$PAPERLESS_TOKEN" ]]; then
-        sg docker -c "PAPERLESS_TOKEN='${PAPERLESS_TOKEN}' bash ${REPO_ROOT}/scripts/up_peer_components.sh tier2"
-        ok "Peer components running (tier1 + tier2)"
-    else
-        warn "Skipping tier2 peer-component bring-up — no PAPERLESS_TOKEN."
-        warn "Run manually after token extraction:"
-        warn "  PAPERLESS_TOKEN=\$(bash scripts/get_paperless_token.sh) bash scripts/up_peer_components.sh tier2"
-    fi
-fi
-
-# ===========================================================================
-# Step 7 — Run verify_integration.sh
+# Step 6 — Run verify_integration.sh
 # ===========================================================================
 if (( SKIP_VERIFY )); then
-    log "Step 7/7: Skipping verify_integration.sh (--skip-verify)"
+    log "Step 6/6: Skipping verify_integration.sh (--skip-verify)"
 else
-    log "Step 7/7: Running verify_integration.sh (17 checkpoints)"
+    log "Step 6/6: Running verify_integration.sh (17 checkpoints)"
     sg docker -c "bash ${REPO_ROOT}/scripts/verify_integration.sh"
 fi
 
