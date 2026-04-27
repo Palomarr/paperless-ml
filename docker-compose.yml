@@ -617,11 +617,12 @@ services:
       - paperless_consume:/usr/src/paperless/consume
       - paperless_export:/usr/src/paperless/export
     networks:
-      # paperless_ml_net for ml-gateway/qdrant/redpanda; paperless_data_default
-      # for the data-stack postgres that paperless_ml's views write to.
+      # paperless_ml_net carries everything: ml-gateway, qdrant, redpanda,
+      # and the data-stack-postgres that paperless_ml's views write to.
+      # (data-stack-postgres is now defined in docker-compose.peer.yml on
+      # this same network, so no separate paperless_data_default attach.)
       - default
       - paperless_ml_net
-      - paperless_data_default
 
 volumes:
   pg_data:
@@ -645,11 +646,3 @@ networks:
   paperless_ml_net:
     name: paperless_ml_net
     driver: bridge
-  # Data-stack network owned by REDES01/paperless_data's compose. Declared
-  # external here because paperless-web needs to reach the data-stack
-  # postgres (htr_corrections, search_feedback) that Elnath's paperless_ml
-  # views write to. The data stack is brought up by up_peer_components.sh
-  # tier2; if that hasn't happened, attach fails non-fatally and his views
-  # return 503 cleanly (we fall back to displaying empty queues).
-  paperless_data_default:
-    external: true
