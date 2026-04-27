@@ -304,6 +304,12 @@ class PipelineScheduler:
             )
         src_bucket = parsed.netloc or self.cfg.production_bucket
         src_prefix = parsed.path.lstrip("/")
+        # MLflow's `mlflow-artifacts:/` scheme maps to the configured
+        # --artifacts-destination root (s3://paperless-datalake/mlflow-artifacts/)
+        # but urlparse strips that prefix. Reattach it so the MinIO server-side
+        # copy can find the actual objects.
+        if parsed.scheme == "mlflow-artifacts":
+            src_prefix = "mlflow-artifacts/" + src_prefix
         if src_prefix and not src_prefix.endswith("/"):
             src_prefix = src_prefix + "/"
 
