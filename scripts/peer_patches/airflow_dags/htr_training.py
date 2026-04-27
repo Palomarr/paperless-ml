@@ -47,8 +47,8 @@ MLFLOW_URL = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 _DATA_STACK_ENV = {
     "MLFLOW_TRACKING_URI":     MLFLOW_URL,
     "MINIO_ENDPOINT":          "minio:9000",
-    "MINIO_ACCESS_KEY":        "admin",
-    "MINIO_SECRET_KEY":        "paperless_minio",
+    "MINIO_ACCESS_KEY":        "minioadmin",
+    "MINIO_SECRET_KEY":        "minioadmin",
     "MINIO_BUCKET":            "paperless-datalake",
     # batch_htr.py wants a DSN string
     "DB_DSN":                  "host=data-stack-postgres dbname=paperless user=user password=paperless_postgres",
