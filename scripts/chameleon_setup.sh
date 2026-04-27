@@ -228,6 +228,60 @@ if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
 fi
 
 # ===========================================================================
+# Step 5.5 — Bootstrap IAM dataset + drift detector reference
+# Idempotent: skips ingestion if IAM parquets already in MinIO; skips
+# drift-build if detector already at warehouse/drift_reference/htr_v1/cd/.
+# Required by drift_monitor (loads detector on startup → /health 503 until
+# reference exists) and by airflow's htr_training DAG (batch_htr.py reads
+# from warehouse/iam_dataset/train/ when no user corrections are available).
+# ===========================================================================
+if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
+    log "Step 5.5/6: Bootstrap IAM dataset + drift detector reference (idempotent)"
+
+    # IAM ingestion — skip if shards already present.
+    if sg docker -c "docker compose ${COMPOSE_FILES[*]} exec -T minio mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1 && \
+                     docker compose ${COMPOSE_FILES[*]} exec -T minio mc ls local/paperless-datalake/warehouse/iam_dataset/train/ 2>/dev/null | grep -q '\.parquet'"; then
+        ok "IAM dataset already present in MinIO — skipping ingest"
+    else
+        log "    Building paperless_ingest image (one-shot HF→MinIO ingestor)"
+        sg docker -c "docker build -t paperless_ingest:latest -f ${PEER_DATA_DIR}/ingestion/Dockerfile ${PEER_DATA_DIR}/ingestion/" >/dev/null
+        ok "paperless_ingest:latest built"
+
+        log "    Ingesting Teklia/IAM-line dataset → s3://paperless-datalake/warehouse/iam_dataset/ (~5-10 min)"
+        sg docker -c "docker run --rm \
+            --network paperless_ml_net \
+            -e MINIO_ENDPOINT=minio:9000 \
+            -e MINIO_ACCESS_KEY=minioadmin \
+            -e MINIO_SECRET_KEY=minioadmin \
+            -e MINIO_BUCKET=paperless-datalake \
+            paperless_ingest:latest python ingest_iam.py" >/dev/null 2>&1 \
+            && ok "IAM dataset ingested" \
+            || warn "IAM ingestion returned non-zero — drift_monitor will stay unhealthy until rerun"
+    fi
+
+    # Drift reference — skip if detector already there.
+    if sg docker -c "docker compose ${COMPOSE_FILES[*]} exec -T minio mc ls local/paperless-datalake/warehouse/drift_reference/htr_v1/cd/x_ref.npy 2>/dev/null | grep -q x_ref.npy"; then
+        ok "Drift reference detector already present — skipping build"
+    else
+        log "    Building drift detector from 500 IAM crops (uses drift_monitor image + pyarrow)"
+        sg docker -c "docker run --rm \
+            --network paperless_ml_net \
+            -e MINIO_ENDPOINT=minio:9000 \
+            -e MINIO_ACCESS_KEY=minioadmin \
+            -e MINIO_SECRET_KEY=minioadmin \
+            -v ${PEER_DATA_DIR}/scripts:/scripts:ro \
+            paperless-ml-drift_monitor:latest \
+            bash -c 'pip install --quiet pyarrow==18.1.0 && python /scripts/build_drift_reference.py'" >/dev/null 2>&1 \
+            && ok "Drift detector built + uploaded" \
+            || warn "Drift reference build returned non-zero — drift_monitor /health will be 503"
+
+        # Restart drift_monitor so it picks up the new detector at startup.
+        sg docker -c "docker compose ${COMPOSE_FILES[*]} restart drift_monitor" >/dev/null 2>&1 || true
+        ok "drift_monitor restarted to load detector"
+    fi
+fi
+
+# ===========================================================================
 # Step 6 — Run verify_integration.sh
 # ===========================================================================
 if (( SKIP_VERIFY )); then
