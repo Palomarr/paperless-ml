@@ -41,9 +41,10 @@ it on first boot, and brings up all services with health-gated
 dependency ordering:
 
 1. Install Docker + NVIDIA Container Toolkit (skipped if already present).
-2. Clone `REDES01/paperless_data`, `REDES01/paperless_data_integration`,
-   and `gdtmax/paperless_training_integration` as siblings (or pull to
-   latest if already cloned).
+2. Clone `REDES01/paperless_data`, `REDES01/paperless_data_integration`
+   (which now also hosts the integrated training pipeline + Airflow DAGs),
+   and `gdtmax/paperless_training_integration` (Dongting's reference
+   training scaffold) as siblings (or pull to latest if already cloned).
 3. `docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d`
    — compose self-creates `paperless_ml_net`, brings up all 18 services
    (including `ml-gateway`, `mlflow`, `pipeline-scheduler`, `rollback-ctrl`,
@@ -122,8 +123,12 @@ sg docker -c 'docker compose -f drift_monitor/compose.yml up -d --build'
 
 ### Training cycle
 
-Dongting's training pipeline is invoked on demand rather than running
-as a long-running service. Two paths:
+The integrated training pipeline (Elnath's `paperless_data_integration/training/`,
+real TrOCR fine-tune on IAM) fires on a daily schedule via Airflow's
+`htr_retraining` DAG (02:00 UTC) plus on-demand triggers from
+`pipeline-scheduler`. Dongting's `gdtmax/paperless_training_integration`
+remains as the original reference scaffold (not invoked at runtime).
+Two paths:
 
 ```bash
 # Automated path: pipeline-scheduler auto-triggers when conditions are met
@@ -172,10 +177,12 @@ docker compose -f docker-compose.yml -f docker-compose.shared.yml down
 
 - `--skip-verify` — skip the `verify_integration.sh` run at the end
 - `--skip-peers` — don't clone the three peer repos
-  (`REDES01/paperless_data`, `REDES01/paperless_data_integration`,
-  `gdtmax/paperless_training_integration`). Useful when you're only
-  smoke-testing our stack in isolation or when the peer repos are
-  already present from a prior run.
+  (`REDES01/paperless_data`, `REDES01/paperless_data_integration` —
+  which hosts the integrated training pipeline + Airflow DAGs — and
+  `gdtmax/paperless_training_integration` — Dongting's reference
+  training scaffold). Useful when you're only smoke-testing our stack
+  in isolation or when the peer repos are already present from a
+  prior run.
 
 ## 9. MinIO bucket layout — `paperless-images` vs `paperless-datalake`
 

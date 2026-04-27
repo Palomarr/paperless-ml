@@ -15,8 +15,8 @@ All four repositories are public.
 |---|---|---|
 | [Palomarr/paperless-ml](https://github.com/Palomarr/paperless-ml) (this repo) | Serving + Integration | `ml-gateway` FastAPI + ONNX Runtime inference, `ml_hooks` Django overlay, Prometheus/Alertmanager/Grafana observability, `rollback-ctrl`, `pipeline-scheduler`, one-command Chameleon bring-up |
 | [REDES01/paperless_data](https://github.com/REDES01/paperless_data) | Data — Elnath | IAM + SQuAD ingestion, postgres schema, batch training-set compilation with quality checks, synthetic traffic generator |
-| [REDES01/paperless_data_integration](https://github.com/REDES01/paperless_data_integration) | Data — Elnath | HTR consumer (Kafka → region slicer → ml-gateway → postgres), live drift monitor |
-| [gdtmax/paperless_training_integration](https://github.com/gdtmax/paperless_training_integration) | Training — Dongting | Training pipeline (train / eval / quality gate), ONNX export, MLflow integration |
+| [REDES01/paperless_data_integration](https://github.com/REDES01/paperless_data_integration) | Data + Training (integrated) — Elnath | HTR consumer (Kafka → region slicer → ml-gateway → postgres), live drift monitor, **`training/` (real TrOCR fine-tune on IAM)**, Airflow `htr_retraining` DAG, behavior emulator |
+| [gdtmax/paperless_training_integration](https://github.com/gdtmax/paperless_training_integration) | Training (reference scaffold) — Dongting | Original training pipeline scaffold (train / eval / quality gate / ONNX export structure) + initial MLflow wiring. Used as the reference implementation; the integrated production training (with real IAM data) lives in `paperless_data_integration/training/`. |
 
 ---
 
@@ -61,7 +61,7 @@ Eight tiers, one compose file:
 - **ML serving** — `ml-gateway` (FastAPI + ONNX Runtime) exposes `/htr`, `/search/encode`, `/search/query`, `/metrics`, `/health`. Models pulled from MinIO on boot.
 - **Storage** — Postgres (Paperless's DB + Feedback table), Redis (Celery broker), Qdrant (768-dim vector index), MinIO (document images + model artifacts + training-data warehouse), Redpanda (Kafka-compatible event stream for uploads / corrections / queries / feedback).
 - **Monitoring** — Prometheus scrapes six targets and loads eight alert rules across two groups. Grafana auto-provisions a nine-panel dashboard. Alertmanager routes alerts to `rollback-ctrl`.
-- **Training** — MLflow tracking server with Postgres backend and MinIO artifact store. Dongting's pipeline logs all runs and registers models conditionally via the quality gate.
+- **Training** — MLflow tracking server with Postgres backend and MinIO artifact store. Elnath's integrated training pipeline (`paperless_data_integration/training/`, real TrOCR fine-tune on IAM) is fired by the daily Airflow `htr_retraining` DAG and registers models conditionally via the quality gate. Dongting's `paperless_training_integration` repo remains as the original reference scaffold (train/eval/quality-gate structure + initial MLflow wiring) that the integrated version was adapted from.
 - **Automated pipeline** — `pipeline-scheduler` auto-triggers retraining when two compound conditions hold (≥500 new corrections AND ≥24h since last run). On gate pass, the scheduler promotes the new version via MLflow alias and restarts `ml-gateway`. On gate fail, per-reason counters are emitted to Prometheus so silent-failure weeks are observable.
 - **Safeguarding** — `rollback-ctrl` executes automated rollback on sustained quality or drift alerts: swaps the `@production` MLflow alias back one version and restarts `ml-gateway` via the Docker API. Per-alertname cooldown handles Alertmanager retry dedup; defensive version floor refuses to swap below v1.
 - **Data quality** — Elnath's three checkpoints: post-ingestion validation, training-set quality checks with rejection logs, and live drift monitor fed from the HTR consumer.
@@ -82,8 +82,8 @@ Three-person team.
 | Member | Role | Primary ownership |
 |---|---|---|
 | Yikai Sun | Serving | `ml-gateway`, `ml_hooks` overlay, Prometheus + Grafana monitoring, rollback controller, pipeline scheduler, one-command bring-up, feedback UI |
-| Dongting Gao | Training | Model training pipeline, evaluation, quality gates, MLflow integration, ONNX export, retraining runs against gate thresholds |
-| Elnath Zhao | Data | Data ingestion (IAM, SQuAD), postgres schema, HTR consumer, region slicer, batch training-set compilation with quality checks, live drift monitor, synthetic data generator |
+| Dongting Gao | Training (reference scaffold) | Original training pipeline scaffold + initial MLflow wiring at `gdtmax/paperless_training_integration`; the integrated production training was migrated to Elnath's repo on 2026-04-19 due to a mid-project bandwidth shift |
+| Elnath Zhao | Data + Training (integrated) | Data ingestion (IAM, SQuAD), postgres schema, HTR consumer, region slicer, batch training-set compilation with quality checks, live drift monitor, synthetic data generator, **integrated training pipeline (real TrOCR fine-tune) + Airflow `htr_retraining` DAG + behavior emulator** |
 
 ---
 
