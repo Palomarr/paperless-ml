@@ -78,8 +78,18 @@ build_training_images() {
     ok "htr_trainer:latest built"
 
     info "Building htr_batch image (used by airflow build_snapshot)"
-    docker build -t htr_batch:latest "$PEER_DATA_DIR/batch_pipeline"
-    ok "htr_batch:latest built"
+    # Overlay our patched batch_htr.py (fixes mc init order + corrected_at
+    # datetime/string handling) onto a temporary build context so we don't
+    # mutate the peer clone. Mirrors scripts/peer_patches/htr_consumer.py
+    # but at build-time (DockerOperator can't bind-mount at task-spawn).
+    # PR upstream: REDES01/paperless_data fix/batch-htr-mc-and-corrected-at.
+    local TMP_BATCH_CTX
+    TMP_BATCH_CTX="$(mktemp -d)"
+    cp -r "$PEER_DATA_DIR/batch_pipeline/." "$TMP_BATCH_CTX/"
+    cp "$ROOT_DIR/scripts/peer_patches/batch_htr.py" "$TMP_BATCH_CTX/batch_htr.py"
+    docker build -t htr_batch:latest "$TMP_BATCH_CTX"
+    rm -rf "$TMP_BATCH_CTX"
+    ok "htr_batch:latest built (with batch_htr.py patches)"
     cd "$ROOT_DIR"
 }
 
