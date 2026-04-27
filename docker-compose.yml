@@ -437,12 +437,17 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       # Permit access via any Host header (needed when reached via floating IP)
       MLFLOW_SERVER_ALLOWED_HOSTS: "*"
+    # gunicorn --timeout 600 (default 30s) keeps workers alive while
+    # serve-artifacts buffers + re-uploads large transformers shards
+    # (~331MB each for VisionEncoderDecoderModel) to MinIO; without it
+    # workers get killed mid-upload and the trainer hangs on shard 2/N.
     command: >
       /bin/sh -c "pip install --quiet psycopg2-binary boto3 &&
       mlflow server
       --backend-store-uri postgresql://paperless:paperless@postgres/mlflow
       --artifacts-destination s3://paperless-datalake/mlflow-artifacts/
       --serve-artifacts
+      --gunicorn-opts '--timeout 600'
       --host 0.0.0.0
       --port 5000"
     healthcheck:
