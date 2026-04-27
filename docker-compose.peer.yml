@@ -246,6 +246,16 @@ services:
       - ./scripts/peer_patches/airflow_dags/archive_corrections.py:/opt/airflow/dags/archive_corrections.py:ro
       - ./scripts/peer_patches/airflow_dags/search_feedback_rerank.py:/opt/airflow/dags/search_feedback_rerank.py:ro
 
+networks:
+  # Re-declare paperless_ml_net here (after airflow's compose in the -f list)
+  # to override airflow's `external: true`. Our docker-compose.yml self-creates
+  # this network on first boot — declaring it `external: true` would fail
+  # because nothing pre-creates it.
+  paperless_ml_net:
+    name: paperless_ml_net
+    driver: bridge
+    external: false
+
 volumes:
   data_stack_pg_data:
   paperless_token:

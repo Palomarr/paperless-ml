@@ -162,8 +162,12 @@ COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.shared.yml)
 if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
     export PEER_INT_DIR="${PROJECT_PARENT}/paperless_data_integration"
     export PEER_DATA_DIR="${PROJECT_PARENT}/paperless_data"
-    COMPOSE_FILES+=(-f docker-compose.peer.yml)
+    # Order matters: airflow's compose declares paperless_ml_net as
+    # `external: true`, which would fail because we self-create it. Putting
+    # docker-compose.peer.yml AFTER airflow's compose lets peer.yml's
+    # `external: false` override the merged spec.
     COMPOSE_FILES+=(-f "${PEER_INT_DIR}/airflow/compose.yml")
+    COMPOSE_FILES+=(-f docker-compose.peer.yml)
 fi
 
 # ===========================================================================
