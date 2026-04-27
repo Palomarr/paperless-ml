@@ -552,8 +552,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Load our counter-forwarder app alongside the baked-in paperless_ml.
-      PAPERLESS_APPS: "ml_counters"
+      # Load both ml_hooks (encode_document → Qdrant, /api/search/ merge,
+      # /ml-ui/, Redpanda event emission, FAB middleware) AND ml_counters
+      # (counter forwarder for paperless_ml POSTs) alongside the baked-in
+      # paperless_ml. Both URL namespaces coexist:
+      #   ml_hooks      → /api/ml/feedback/, /ml-ui/*
+      #   paperless_ml  → /api/ml/htr/*, /api/ml/search/feedback/  (his fork)
+      #   ml_counters   → middleware-only, no URLs
+      # All three signal handlers fire on Document save — duplicate publish
+      # to paperless.uploads is acceptable (consumers dedup by paperless_doc_id)
+      # and Qdrant upserts are idempotent (UUID5 keys).
+      PAPERLESS_APPS: "ml_hooks,ml_counters"
       PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
 
       # Paperless's own datastores (unchanged).
