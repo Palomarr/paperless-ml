@@ -12,7 +12,11 @@ class MlHooksConfig(AppConfig):
     def ready(self):
         self._connect_signals()
         self._install_url_routes()
-        self._install_middleware()
+        # _install_middleware() (FAB on document pages) deprecated in favor of
+        # the sidebar tabs added by REDES01/paperless-ngx@dev's paperless_ml
+        # frontend (HTR Review + Semantic Search). Sidebar is a strict UX
+        # superset (region-level corrections, confidence color-coding, crop
+        # preview, opt-in toggle, search mode selector, model_version display).
 
     def _connect_signals(self):
         from documents.signals import document_consumption_finished
@@ -58,19 +62,27 @@ class MlHooksConfig(AppConfig):
                 name="ml_global_search",
             ),
         )
-        # 3. /ml-ui/* — Django template feedback UI (R4).
-        #    HTR correction editor + search rating thumbs. Pure additive;
-        #    Paperless's Angular SPA at / is untouched.
+        # 3. /ml-ui/* — DEPRECATED. Kept as a redirect to /ml/htr-review for
+        #    any old links (FAB middleware, README references). The full
+        #    feedback UI is now provided by REDES01/paperless-ngx@dev's
+        #    paperless_ml app (Angular sidebar tabs at /ml/htr-review and
+        #    /ml/search). The Django template UI here was a strict subset —
+        #    every feature is covered (and richer) by the sidebar UI.
+        from django.views.generic import RedirectView
         paperless_urls.urlpatterns.insert(
             0,
-            re_path(r"^ml-ui/", include("ml_hooks.urls_ui")),
+            re_path(
+                r"^ml-ui/.*$",
+                RedirectView.as_view(url="/ml/htr-review", permanent=True),
+                name="ml_ui_deprecated_redirect",
+            ),
         )
 
         setattr(paperless_urls, marker, True)
         clear_url_caches()
         log.info(
-            "ml_hooks: mounted /api/ml/ routes, /api/search/ override, "
-            "and /ml-ui/ feedback UI",
+            "ml_hooks: mounted /api/ml/ routes + /api/search/ override; "
+            "/ml-ui/* now redirects to /ml/htr-review (sidebar UI canonical)",
         )
 
     def _install_middleware(self):
