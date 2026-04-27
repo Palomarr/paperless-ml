@@ -19,9 +19,12 @@
 #   bash scripts/chameleon_setup.sh
 #
 # Flags:
-#   --skip-verify   don't run verify_integration.sh at the end
-#   --skip-peers    don't clone REDES01/paperless_data and REDES01/paperless_data_integration
-#                   (peer repos needed for full Path A integration; see DEPLOYMENT.md)
+#   --skip-verify              don't run verify_integration.sh at the end
+#   --skip-peers               don't clone REDES01/paperless_data and REDES01/paperless_data_integration
+#                              (peer repos needed for full Path A integration; see DEPLOYMENT.md)
+#   --skip-peer-components     don't bring up Elnath's peer components (htr_consumer,
+#                              drift_monitor, behavior_emulator, airflow + paperless-training).
+#                              Implied by --skip-peers since those services need the peer repos.
 # ===========================================================================
 
 set -euo pipefail
@@ -32,10 +35,12 @@ PROJECT_PARENT="$(cd "${REPO_ROOT}/.." && pwd)"
 
 SKIP_VERIFY=0
 SKIP_PEERS=0
+SKIP_PEER_COMPONENTS=0
 for arg in "$@"; do
     case "$arg" in
-        --skip-verify) SKIP_VERIFY=1 ;;
-        --skip-peers)  SKIP_PEERS=1 ;;
+        --skip-verify)         SKIP_VERIFY=1 ;;
+        --skip-peers)          SKIP_PEERS=1; SKIP_PEER_COMPONENTS=1 ;;
+        --skip-peer-components) SKIP_PEER_COMPONENTS=1 ;;
         -h|--help)
             grep '^#' "$0" | head -30
             exit 0 ;;
@@ -53,7 +58,7 @@ fail()  { printf "%s ✗ %s %s\n"   "$C_RED"    "$C_RESET" "$*"; exit 1; }
 # ===========================================================================
 # Step 1 — system packages + Docker Engine
 # ===========================================================================
-log "Step 1/6: Installing system packages and Docker Engine"
+log "Step 1/7: Installing system packages and Docker Engine"
 
 if ! command -v docker >/dev/null 2>&1; then
     sudo apt-get update -qq
@@ -73,7 +78,7 @@ sudo usermod -aG docker "$USER"
 # ===========================================================================
 # Step 2 — NVIDIA Container Toolkit (GPU support for Docker)
 # ===========================================================================
-log "Step 2/6: Installing NVIDIA Container Toolkit"
+log "Step 2/7: Installing NVIDIA Container Toolkit"
 
 if ! dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'; then
     curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
@@ -102,9 +107,9 @@ fi
 # Step 3 — Clone peer repos as siblings
 # ===========================================================================
 if (( SKIP_PEERS )); then
-    log "Step 3/6: Skipping peer-repo clone (--skip-peers)"
+    log "Step 3/7: Skipping peer-repo clone (--skip-peers)"
 else
-    log "Step 3/6: Cloning peer repos into ${PROJECT_PARENT}/"
+    log "Step 3/7: Cloning peer repos into ${PROJECT_PARENT}/"
 
     clone_if_missing() {
         local url="$1" dst="$2"
@@ -140,7 +145,7 @@ fi
 # The paperless_ml_net bridge is declared in docker-compose.yml and
 # self-creates on first boot — no explicit network-create step needed.
 # ===========================================================================
-log "Step 4/6: Bringing up our stack (services + Path A overlay)"
+log "Step 4/7: Bringing up our stack (services + Path A overlay)"
 
 cd "$REPO_ROOT"
 sg docker -c "docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d"
@@ -165,7 +170,7 @@ done
 # Needed by Elnath's data_generator (token auth). Idempotent. 
 # See scripts/get_paperless_token.sh.
 # ===========================================================================
-log "Step 5/6: Extracting Paperless API token for admin"
+log "Step 5/7: Extracting Paperless API token for admin"
 PAPERLESS_TOKEN="$(sg docker -c "bash ${REPO_ROOT}/scripts/get_paperless_token.sh" 2>/dev/null | tr -d '\r' | tail -n 1)"
 if [[ -z "$PAPERLESS_TOKEN" || "${#PAPERLESS_TOKEN}" -lt 20 ]]; then
     warn "Token extraction returned unexpected output. Retry manually with:"
@@ -176,12 +181,38 @@ else
 fi
 
 # ===========================================================================
+# Step 6 — Bring up peer components (Elnath's data-pipeline + retraining stack)
+# Folds htr_consumer, drift_monitor, behavior_emulator, airflow, and the
+# paperless-training image into the same bootstrap so the integrated system
+# comes up in one command (per system-impl rubric: "no SSH-based intervention
+# beyond a single bootstrap"). Skipped if --skip-peer-components or peer repos
+# weren't cloned.
+# ===========================================================================
+if (( SKIP_PEER_COMPONENTS )); then
+    log "Step 6/7: Skipping peer components (--skip-peer-components)"
+elif (( SKIP_PEERS )); then
+    log "Step 6/7: Skipping peer components (peer repos not cloned)"
+else
+    log "Step 6/7: Bringing up peer components (htr_consumer, drift_monitor, behavior_emulator, airflow)"
+    sg docker -c "bash ${REPO_ROOT}/scripts/up_peer_components.sh tier1"
+    # tier2 needs PAPERLESS_TOKEN to wire htr_consumer's auth header.
+    if [[ -n "$PAPERLESS_TOKEN" ]]; then
+        sg docker -c "PAPERLESS_TOKEN='${PAPERLESS_TOKEN}' bash ${REPO_ROOT}/scripts/up_peer_components.sh tier2"
+        ok "Peer components running (tier1 + tier2)"
+    else
+        warn "Skipping tier2 peer-component bring-up — no PAPERLESS_TOKEN."
+        warn "Run manually after token extraction:"
+        warn "  PAPERLESS_TOKEN=\$(bash scripts/get_paperless_token.sh) bash scripts/up_peer_components.sh tier2"
+    fi
+fi
+
+# ===========================================================================
 # Step 7 — Run verify_integration.sh
 # ===========================================================================
 if (( SKIP_VERIFY )); then
-    log "Step 6/6: Skipping verify_integration.sh (--skip-verify)"
+    log "Step 7/7: Skipping verify_integration.sh (--skip-verify)"
 else
-    log "Step 6/6: Running verify_integration.sh (13 checkpoints)"
+    log "Step 7/7: Running verify_integration.sh (17 checkpoints)"
     sg docker -c "bash ${REPO_ROOT}/scripts/verify_integration.sh"
 fi
 
@@ -202,6 +233,9 @@ echo "  Alertmanager                : http://${FLOATING_IP}:9093"
 echo "  Qdrant dashboard            : http://${FLOATING_IP}:6333/dashboard"
 echo "  MinIO console               : http://${FLOATING_IP}:9001   (minioadmin / minioadmin)"
 echo "  MLflow UI                   : http://${FLOATING_IP}:5050"
+if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
+    echo "  Airflow (peer retraining)   : http://${FLOATING_IP}:8080   (airflow / airflow)"
+fi
 echo
 if [[ -n "$PAPERLESS_TOKEN" ]]; then
     echo "Paperless API token (for data_generator, demos, curl scripts):"
