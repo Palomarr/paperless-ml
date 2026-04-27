@@ -68,21 +68,24 @@ class MlHooksConfig(AppConfig):
         #    covered (and richer) by the sidebar UI: region-level corrections,
         #    confidence color-coding, crop preview, opt-in toggle, search
         #    mode selector, model_version display.
+        # Insert ORDER MATTERS: insert(0, ...) prepends, so the LAST insert
+        # ends up at index 0. To make the specific /ml-ui/search/ pattern
+        # take priority over the catch-all, insert the catch-all first.
         from django.views.generic import RedirectView
-        paperless_urls.urlpatterns.insert(
-            0,
-            re_path(
-                r"^ml-ui/search/?$",
-                RedirectView.as_view(url="/ml/search", permanent=True),
-                name="ml_ui_search_deprecated",
-            ),
-        )
         paperless_urls.urlpatterns.insert(
             0,
             re_path(
                 r"^ml-ui/.*$",
                 RedirectView.as_view(url="/ml/htr-review", permanent=True),
                 name="ml_ui_deprecated_redirect",
+            ),
+        )
+        paperless_urls.urlpatterns.insert(
+            0,
+            re_path(
+                r"^ml-ui/search/?$",
+                RedirectView.as_view(url="/ml/search", permanent=True),
+                name="ml_ui_search_deprecated",
             ),
         )
 
