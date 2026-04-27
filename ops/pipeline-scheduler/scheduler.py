@@ -326,12 +326,40 @@ class PipelineScheduler:
             log.info(f"PROMOTE: cleared {removed} existing objects under {dst_prefix}")
 
         # Copy new files. Server-side copy — no data transits the scheduler.
+        # MLflow-transformers layout (mlflow.transformers.log_model) stores
+        # the model in nested subdirs:
+        #   <src>/model/{config.json,safetensors,...}     ← HF weights + config
+        #   <src>/components/tokenizer/{vocab.json,...}    ← HF tokenizer
+        #   <src>/components/image_processor/{preprocessor_config.json}
+        #   <src>/{MLmodel,conda.yaml,LICENSE.txt,model_card.md,...}  ← MLflow wrapper
+        # ml-gateway's app_ort.py uses optimum.ORTModelForVision2Seq.from_pretrained()
+        # which expects a FLAT HF directory. So flatten model/, components/tokenizer/,
+        # components/image_processor/ to dst root and skip MLflow wrapper files.
+        SKIP_FILES = {
+            "MLmodel", "LICENSE.txt", "conda.yaml", "python_env.yaml",
+            "requirements.txt", "model_card.md", "model_card_data.yaml",
+        }
+        FLATTEN_PREFIXES = ("model/", "components/tokenizer/", "components/image_processor/")
         copied = 0
         for obj in self.minio.list_objects(src_bucket, prefix=src_prefix, recursive=True):
             rel = obj.object_name[len(src_prefix):]
             if not rel:
                 continue
-            dst_key = dst_prefix + rel
+            # Skip MLflow wrapper files at root.
+            if rel in SKIP_FILES:
+                continue
+            # Flatten known HF subdir layout.
+            flat_name = rel
+            for p in FLATTEN_PREFIXES:
+                if rel.startswith(p):
+                    flat_name = rel[len(p):]
+                    break
+            else:
+                # Files outside the flatten paths (e.g. components/something_else/)
+                # — skip; they're MLflow internal.
+                if rel.startswith("components/"):
+                    continue
+            dst_key = dst_prefix + flat_name
             self.minio.copy_object(
                 dst_bucket, dst_key,
                 CopySource(src_bucket, obj.object_name),
