@@ -93,19 +93,19 @@ services:
       PAPERLESS_DBPASS: paperless
       PAPERLESS_REDIS: "redis://redis:6379"
       PAPERLESS_SECRET_KEY: "dev-only-insecure-key-do-not-ship"
-    command: >
-      /bin/sh -c "
-      python /usr/src/paperless/src/manage.py shell -c '
-      from rest_framework.authtoken.models import Token;
-      from django.contrib.auth import get_user_model;
-      u = get_user_model().objects.get(username=\"admin\");
-      t,_ = Token.objects.get_or_create(user=u);
-      open(\"/shared/token\", \"w\").write(t.key);
-      print(\"paperless-token-init: wrote\", len(t.key), \"char token\")
-      '
-      "
+    # Override the image's s6-init entrypoint (which runs the full paperless
+    # boot sequence: redis-wait, db-wait, migrations, ...). We just need to
+    # run a single Django shell command, so go straight to bash.
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        python /usr/src/paperless/src/manage.py shell -c "from rest_framework.authtoken.models import Token; from django.contrib.auth import get_user_model; u = get_user_model().objects.get(username='admin'); t,_ = Token.objects.get_or_create(user=u); open('/shared/token','w').write(t.key); print('paperless-token-init: wrote', len(t.key), 'char token')"
     restart: "no"
     networks:
+      # `default` so we can reach paperless's postgres + redis (which sit on
+      # the compose project default network); paperless_ml_net so the shared
+      # paperless_token volume + future ml-gateway calls work.
+      - default
       - paperless_ml_net
 
   # ── HTR consumer ───────────────────────────────────────────────────────
