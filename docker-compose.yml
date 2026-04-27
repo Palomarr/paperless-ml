@@ -623,6 +623,17 @@ services:
       # this same network, so no separate paperless_data_default attach.)
       - default
       - paperless_ml_net
+    # Override the image's built-in healthcheck (no start_period, 5 retries)
+    # so the long Django migration phase on first boot doesn't trip the
+    # container into "unhealthy" before it can finish migrating + start
+    # gunicorn. Paperless v3 from-scratch migrations on slow disks can
+    # take ~5min; the image default is ~150s window.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-L", "--max-time", "5", "http://localhost:8000"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 600s
 
 volumes:
   pg_data:
