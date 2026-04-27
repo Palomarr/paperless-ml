@@ -37,14 +37,15 @@
 
 services:
   # ── Data-stack postgres ────────────────────────────────────────────────
-  # Separate postgres instance for Elnath's ML schema. Container name is
-  # 'postgres-data-stack' to avoid colliding with our 'postgres' service.
-  # Peer code that hardcodes host=postgres still works via airflow DAG env
-  # overrides set in docker-compose.shared.yml + the ML_DB_HOST env we set
-  # on htr_consumer below.
+  # Separate postgres instance for Elnath's ML schema. Hostname on the
+  # paperless_ml_net is `data-stack-postgres` (no `postgres` alias — that
+  # would collide with our own postgres on the same network and create
+  # ambiguous DNS resolution for paperless-web). Peer code that hardcoded
+  # `host=postgres` for the data stack is patched via bind-mount overlays
+  # in scripts/peer_patches/airflow_dags/.
   data-stack-postgres:
     image: postgres:16
-    container_name: postgres-data-stack
+    container_name: data-stack-postgres
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: paperless_postgres
@@ -57,13 +58,7 @@ services:
       # is invoked; chameleon_setup.sh sets PEER_DATA_DIR appropriately.
       - ${PEER_DATA_DIR:-../paperless_data}/docker/init_sql:/docker-entrypoint-initdb.d:ro
     networks:
-      paperless_ml_net:
-        # Network alias so peer code that hardcodes host=postgres (e.g.
-        # airflow's _DATA_STACK_ENV in htr_training.py DB_DSN, drift_monitor)
-        # resolves to this container instead of our paperless 'postgres'.
-        # Our paperless-web sets PAPERLESS_DBHOST=paperless-postgres-alias
-        # via docker-compose.yml service_aliases below.
-        aliases: [postgres]
+      - paperless_ml_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d paperless"]
       interval: 10s
@@ -149,9 +144,8 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: paperless-images
 
-      # Data-stack postgres (this file). 'postgres' alias on paperless_ml_net
-      # resolves to data-stack-postgres container (see networks block above).
-      ML_DB_HOST: postgres
+      # Data-stack postgres (separate instance from paperless's own DB).
+      ML_DB_HOST: data-stack-postgres
       ML_DB_PORT: "5432"
       ML_DB_NAME: paperless
       ML_DB_USER: user
@@ -216,7 +210,7 @@ services:
     environment:
       BE_MODE: ${BE_MODE:-normal}
       # Data-stack postgres (writes query_sessions + search_feedback rows).
-      DB_DSN: host=postgres port=5432 dbname=paperless user=user password=paperless_postgres
+      DB_DSN: host=data-stack-postgres port=5432 dbname=paperless user=user password=paperless_postgres
       ML_GATEWAY_URL: http://ml-gateway:8000
       # ml-gateway has /htr + /search/query (post-E1) and legacy
       # /predict/htr + /predict/search aliases (commit c055e87).
@@ -224,6 +218,31 @@ services:
     networks:
       - paperless_ml_net
     restart: unless-stopped
+
+  # ── Airflow DAG patches ────────────────────────────────────────────────
+  # Bind-mount our patched copies of three DAGs over the upstream versions:
+  #   - htr_training.py / archive_corrections.py / search_feedback_rerank.py
+  # Patches: replace host=postgres → host=data-stack-postgres for all
+  # data-stack DB references, and update MinIO cred defaults from
+  # admin/paperless_minio → minioadmin/minioadmin in archive_corrections.py.
+  # Compose merges volume lists across multi-file invocations, so these
+  # mounts append to (and shadow) the upstream airflow compose's volume
+  # mounts at the same target path.
+  airflow-webserver:
+    volumes:
+      - ./scripts/peer_patches/airflow_dags/htr_training.py:/opt/airflow/dags/htr_training.py:ro
+      - ./scripts/peer_patches/airflow_dags/archive_corrections.py:/opt/airflow/dags/archive_corrections.py:ro
+      - ./scripts/peer_patches/airflow_dags/search_feedback_rerank.py:/opt/airflow/dags/search_feedback_rerank.py:ro
+  airflow-scheduler:
+    volumes:
+      - ./scripts/peer_patches/airflow_dags/htr_training.py:/opt/airflow/dags/htr_training.py:ro
+      - ./scripts/peer_patches/airflow_dags/archive_corrections.py:/opt/airflow/dags/archive_corrections.py:ro
+      - ./scripts/peer_patches/airflow_dags/search_feedback_rerank.py:/opt/airflow/dags/search_feedback_rerank.py:ro
+  airflow-init:
+    volumes:
+      - ./scripts/peer_patches/airflow_dags/htr_training.py:/opt/airflow/dags/htr_training.py:ro
+      - ./scripts/peer_patches/airflow_dags/archive_corrections.py:/opt/airflow/dags/archive_corrections.py:ro
+      - ./scripts/peer_patches/airflow_dags/search_feedback_rerank.py:/opt/airflow/dags/search_feedback_rerank.py:ro
 
 volumes:
   data_stack_pg_data:
