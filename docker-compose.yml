@@ -552,17 +552,21 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Load both ml_hooks (encode_document → Qdrant, /api/search/ merge,
-      # /ml-ui/, Redpanda event emission, FAB middleware) AND ml_counters
-      # (counter forwarder for paperless_ml POSTs) alongside the baked-in
-      # paperless_ml. Both URL namespaces coexist:
+      # Load ml_hooks (encode_document → Qdrant, /api/search/ merge,
+      # /ml-ui/, Redpanda event emission, FAB middleware), ml_counters
+      # (counter forwarder for paperless_ml POSTs), and ml_compat (Paperless
+      # int-id ↔ data-stack uuid translation shim) alongside the baked-in
+      # paperless_ml. URL namespaces coexist:
       #   ml_hooks      → /api/ml/feedback/, /ml-ui/*
       #   paperless_ml  → /api/ml/htr/*, /api/ml/search/feedback/  (his fork)
       #   ml_counters   → middleware-only, no URLs
+      #   ml_compat     → middleware-only; rewrites /api/documents/<UUID>/...
+      #                   to /api/documents/<int>/... and translates the
+      #                   int doc_id in search_feedback POSTs to UUID.
       # All three signal handlers fire on Document save — duplicate publish
       # to paperless.uploads is acceptable (consumers dedup by paperless_doc_id)
       # and Qdrant upserts are idempotent (UUID5 keys).
-      PAPERLESS_APPS: "ml_hooks,ml_counters"
+      PAPERLESS_APPS: "ml_hooks,ml_counters,ml_compat"
       PYTHONPATH: "/usr/src/paperless/patches:/usr/src/paperless/src"
 
       # Paperless's own datastores (unchanged).
@@ -584,10 +588,12 @@ services:
 
       # Elnath's paperless_ml app reads/writes the data-stack postgres
       # (htr_corrections, search_feedback, query_sessions schemas). The
-      # `postgres` hostname resolves on the paperless_data_default network
-      # we attach below. Falls back to our local postgres if that network
-      # isn't up — paperless_ml's views return 503 cleanly in that case.
-      PAPERLESS_ML_DBHOST: postgres
+      # container is named `data-stack-postgres` and lives on
+      # paperless_ml_net (brought up by docker-compose.peer.yml). NOT
+      # `postgres` — that's our own Paperless DB on the same network, with
+      # different schema and creds; resolving to it would silently auth-fail
+      # every sidebar correction POST.
+      PAPERLESS_ML_DBHOST: data-stack-postgres
       PAPERLESS_ML_DBPORT: "5432"
       PAPERLESS_ML_DBNAME: paperless
       PAPERLESS_ML_DBUSER: user
