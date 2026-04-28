@@ -235,7 +235,13 @@ fi
 # reference exists) and by airflow's htr_training DAG (batch_htr.py reads
 # from warehouse/iam_dataset/train/ when no user corrections are available).
 # ===========================================================================
-if (( ! SKIP_PEER_COMPONENTS )) && (( ! SKIP_PEERS )); then
+# Originally gated on `! SKIP_PEERS` too — but that conflated "skip the
+# git-pull on peer repos" with "skip everything that depends on peer
+# repos". The bootstrap step needs the peer-repo Dockerfile contexts on
+# disk (paperless_ingest/ + drift_monitor/scripts/), but it does NOT need
+# them freshly cloned. Re-run with --skip-peers should still bootstrap
+# IAM + drift if the directories exist locally.
+if (( ! SKIP_PEER_COMPONENTS )) && [ -d "${PEER_DATA_DIR}" ] && [ -d "${PEER_INT_DIR}" ]; then
     log "Step 5.5/6: Bootstrap IAM dataset + drift detector reference (idempotent)"
 
     # IAM ingestion — skip if shards already present.
