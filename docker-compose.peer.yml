@@ -205,6 +205,56 @@ services:
       interval: 15s
       start_period: 60s
 
+  # ── Data generator ─────────────────────────────────────────────────────
+  # Continuous synthetic uploads against Paperless. Runs the
+  # paperless_data/data_generator/loop.sh wrapper so the container restarts
+  # the upload loop indefinitely. Pairs with behavior_emulator (corrections +
+  # search feedback) — together they exercise the full upload → HTR consumer
+  # → correction → retraining ongoing-op flow without human input.
+  #
+  # PAPERLESS_TOKEN is fetched at startup from the shared paperless_token
+  # volume (populated by paperless-token-init) instead of being hardcoded
+  # or env-injected from the operator's shell.
+  data_generator:
+    build:
+      context: ${PEER_DATA_DIR:-../paperless_data}/data_generator
+      dockerfile: Dockerfile
+    image: data_generator:latest
+    container_name: data_generator
+    depends_on:
+      paperless-token-init:
+        condition: service_completed_successfully
+      paperless-web:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      PAPERLESS_URL:    http://paperless-web:8000
+      RATE:             ${DG_RATE:-0.05}
+      CYCLE_DURATION:   ${DG_CYCLE_DURATION:-600}
+      UPLOAD_ONLY:      ${DG_UPLOAD_ONLY:-true}
+      SLEEP_BETWEEN:    ${DG_SLEEP_BETWEEN:-5}
+      # MinIO creds match our deploy (minioadmin/minioadmin), not Elnath's
+      # standalone defaults (admin/paperless_minio).
+      MINIO_ENDPOINT:   minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      IAM_BUCKET:       paperless-datalake
+      IAM_PREFIX:       ${IAM_PREFIX:-warehouse/iam_dataset/train/}
+      IAM_POOL_SIZE:    ${DG_IAM_POOL_SIZE:-500}
+      IAM_MAX_SHARDS:   ${DG_IAM_MAX_SHARDS:-3}
+    volumes:
+      # Shared with paperless-token-init.
+      - paperless_token:/secrets:ro
+    entrypoint: >
+      /bin/sh -c "
+      export PAPERLESS_TOKEN=$$(cat /secrets/token);
+      exec /app/loop.sh
+      "
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
   # ── Behavior emulator ──────────────────────────────────────────────────
   behavior_emulator:
     build:
