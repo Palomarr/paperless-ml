@@ -232,6 +232,45 @@ services:
       - paperless_ml_net
     restart: unless-stopped
 
+  # ── Adminer (PostgreSQL UI) ────────────────────────────────────────────
+  # Browse data-stack-postgres (htr_corrections, search_feedback,
+  # query_sessions, handwritten_regions, document_pages, documents) via a
+  # web UI. Mirrors the service Elnath ships in his standalone
+  # paperless_data/docker/docker-compose.yaml; here we use port 5051 instead
+  # of his 5050 because our MLflow already occupies 5050.
+  adminer:
+    image: adminer:4
+    container_name: adminer
+    depends_on:
+      data-stack-postgres:
+        condition: service_healthy
+    ports:
+      - "5051:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: data-stack-postgres
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
+  # ── Redpanda Console (Kafka UI) ────────────────────────────────────────
+  # Browse paperless.uploads + paperless.corrections + paperless.queries +
+  # paperless.feedback topics, consumer groups (htr-preprocessing), and
+  # offsets via a web UI. Same image Elnath ships; port 8091 instead of his
+  # 8090 because our ml-gateway already occupies 8090.
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.7.0
+    container_name: redpanda-console
+    depends_on:
+      redpanda:
+        condition: service_started
+    ports:
+      - "8091:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
   # ── Airflow DAG patches ────────────────────────────────────────────────
   # Bind-mount our patched copies of three DAGs over the upstream versions:
   #   - htr_training.py / archive_corrections.py / search_feedback_rerank.py
